@@ -9,7 +9,10 @@ import urllib.request
 URL = "https://ralphiia-liveops-intelligence.onrender.com/api/analyze/stream"
 BODY = json.dumps(
     {
-        "prompt": "Investigate Evolution API health down with web sources",
+        "prompt": (
+            "Evaluate my servers with web-backed recommendations and citations. "
+            "Do not change production."
+        ),
         "run_mode": "investigate",
         "session_id": "verify-script",
     }

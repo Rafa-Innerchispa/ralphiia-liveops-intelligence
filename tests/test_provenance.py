@@ -41,3 +41,24 @@ def test_canonical_citations_dedupes_and_drops_bad_urls():
     out = canonical_citations(raw)
     assert len(out) == 1
     assert out[0].url == "https://example.com/a"
+
+
+def test_parse_research_structured_sources():
+    from app.youcom_mcp import _parse_research_citations
+
+    result = {
+        "structuredContent": {
+            "output": {
+                "sources": [
+                    {
+                        "url": "https://doc.evolution-api.com/",
+                        "title": "Evolution API docs",
+                        "snippets": ["GET / health"],
+                    }
+                ]
+            }
+        }
+    }
+    cites = _parse_research_citations(result, "# Answer\n**URL:** **\n")
+    assert len(cites) == 1
+    assert cites[0]["url"].startswith("https://doc.evolution-api.com")

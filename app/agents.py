@@ -595,9 +595,16 @@ async def run_arbitrator(
         confidence = min(0.9, confidence + 0.1)
 
     recommendation = (
-        "Keep Evolution API on node .5 in monitored dry-run; document blocked line; "
-        "do NOT restart or recover until human operator returns from travel."
+        "Keep Evolution API in monitored dry-run; document blocked line; "
+        "do NOT restart or recover until human operator approves."
     )
+    snap_meta = observer.metadata.get("snap") or {}
+    node = snap_meta.get("node_label") or ".5"
+    if snap_meta.get("health") == "down" or snap_meta.get("system_state") == "active":
+        recommendation = (
+            f"Keep Evolution API on node {node} in monitored dry-run; document blocked line; "
+            "do NOT restart or recover until human operator returns from travel."
+        )
     risk_level = "medium"
     llm_mode = "rules"
     llm = ParasailClient(settings)

@@ -119,7 +119,7 @@ class YouComMcpClient:
         text = self._text_blocks(result)
         if text.startswith("MCP error") or "Input validation error" in text:
             raise RuntimeError(text[:300])
-        cites = _parse_search_text(text)
+        cites = _parse_research_citations(result, text)
         return text[:3000] or "Research completed.", cites, "mcp_live"
 
     async def balance(self) -> dict[str, Any]:
@@ -148,6 +148,63 @@ class YouComMcpClient:
         }
 
 
+def _parse_research_citations(result: dict[str, Any], text: str) -> list[dict]:
+    """Extract real URLs from you-research MCP (structuredContent + markdown sources)."""
+    hits: list[dict] = []
+    seen: set[str] = set()
+
+    def add(title: str, url: str, snippet: str = "") -> None:
+        u = (url or "").strip().rstrip(".,)")
+        if not u.startswith("http://") and not u.startswith("https://"):
+            return
+        if u in seen or u in ("**", "#"):
+            return
+        seen.add(u)
+        hits.append(
+            {
+                "title": (title or u).strip()[:200],
+                "url": u,
+                "snippet": (snippet or "")[:500],
+            }
+        )
+
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        output = structured.get("output") or {}
+        if isinstance(output, dict):
+            for src in output.get("sources") or []:
+                if isinstance(src, dict):
+                    add(
+                        str(src.get("title") or "Source"),
+                        str(src.get("url") or ""),
+                        " ".join(src.get("snippets") or [])[:500],
+                    )
+    elif isinstance(structured, list):
+        for item in structured:
+            if not isinstance(item, dict):
+                continue
+            attrs = item.get("attributes") or item
+            add(
+                str(attrs.get("title") or "Source"),
+                str(attrs.get("url") or attrs.get("link") or ""),
+                str(attrs.get("snippet") or attrs.get("description") or ""),
+            )
+
+    for block in _parse_search_text(text):
+        add(block.get("title") or "Source", block.get("url") or "", block.get("snippet") or "")
+
+    for m in re.finditer(r"\[([^\]]+)\]\((https?://[^)]+)\)", text):
+        add(m.group(1), m.group(2))
+
+    for m in re.finditer(r"(?mi)\*\*URL:\*\*\s*(https?://\S+)", text):
+        add("Source", m.group(1))
+
+    for m in re.finditer(r"(?mi)^###\s+\d+\.\s+(.+)\n+\*\*URL:\*\*\s*(https?://\S+)", text):
+        add(m.group(1).strip(), m.group(2))
+
+    return hits[:12]
+
+
 def _parse_search_text(text: str) -> list[dict]:
     """Parse You.com MCP search/research text blocks into citation dicts."""
     hits: list[dict] = []
@@ -160,10 +217,13 @@ def _parse_search_text(text: str) -> list[dict]:
         desc_m = re.search(r"Description:\s*(.+)", block)
         if not url_m:
             continue
+        url = url_m.group(1).strip()
+        if url in ("**", "#") or not url.startswith("http"):
+            continue
         hits.append(
             {
                 "title": (title_m.group(1).strip() if title_m else "Source"),
-                "url": url_m.group(1).strip(),
+                "url": url,
                 "snippet": (desc_m.group(1).strip() if desc_m else block[:240]),
             }
         )

@@ -78,6 +78,20 @@ class AnalyzeRequest(BaseModel):
     correlation_id: str | None = None
     session_id: str | None = None
     research_deeper: bool = False
+    run_mode: str = "auto"  # auto | status_only | investigate
+
+
+class IncidentPreviewRequest(BaseModel):
+    session_id: str | None = None
+    title: str = ""
+    body: str = ""
+
+
+class IncidentCreateRequest(BaseModel):
+    session_id: str | None = None
+    title: str
+    body: str
+    human_approval: str = "approved"
 
 
 class HumanDecisionRequest(BaseModel):

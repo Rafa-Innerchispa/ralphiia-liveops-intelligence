@@ -1,35 +1,35 @@
-# Live demo script (60–90 s) — You.com hackathon
+# Live demo script (60–90 s) — You.com hackathon (English)
 
-**Public URL:** https://sworn-profusely-alongside.ngrok-free.dev/liveops/
+**URLs:** Render (after deploy) · **Fallback:** ngrok `/liveops/` (`LIVEOPS_PUBLIC_URL`)
 
 **Tagline:** Ask your infrastructure. Get evidence, not guesses.
 
-## Scene 1 — Problem (10 s)
+## Act 1 — Live status, save credits (15 s)
 
-"I'm in San Francisco while my infrastructure runs in Ecuador. Instead of five tabs, I ask one question."
+"I'm in San Francisco; my servers are in Ecuador."
 
-## Scene 2 — Fast health (15 s)
+Click **1 · Check Live Status** (or ask: *What is currently unhealthy in my infrastructure?*).
 
-Type or chip: **Check current health**
+Show **Live API trace:** RalfIA + Ollama; **You.com SKIPPED** on purpose.
 
-Show: Observer + RalfIA live probe, **You.com skipped** label, answer paragraph first, metrics at bottom.
+## Act 2 — Web + Parasail (35 s)
 
-## Scene 3 — Investigation (30 s)
+Click **2 · Investigate with Live Sources**.
 
-Type: **Investigate the degraded service using current sources. Do not change production.**
+Show trace: `you-search` → contents → research → Parasail; **citation cards**; recommended dry-run action for Evolution `.5` health down.
 
-Show timeline: Observer → Local Analyst (Ollama if up) → You.com Research → Security → Arbitrator → citations cards.
+## Act 3 — GitHub incident (20 s)
 
-## Scene 4 — Follow-up (15 s)
+Click **3 · Create GitHub Incident** → edit preview → **Approve & create issue**.
 
-Ask: **Why is restarting not the safest first step?** — shows session context.
+Show real GitHub URL (One MCP if `ONE_SECRET`, else GitHub API if `GITHUB_TOKEN`).
 
-## Scene 5 — Human control (10 s)
+## Act 4 — Human checkpoint (10 s)
 
-**Approve (checkpoint)** — dry-run only, no production change.
+**Approve (checkpoint)** — audit only; no production changes.
 
 ## Honesty
 
-- **Used in this run** = only providers that responded this execution.
-- **Opsera** = IDE build-time review panel, not a runtime agent.
-- **Fixture** always labeled when not live `:8101`.
+- **Used in this run** / API trace = only what executed this time.
+- **Opsera** = IDE build-time panel, not a runtime agent.
+- **Fixture** labeled when `:8101` unreachable (e.g. Render without `RALFIA_STATUS_URL` bridge).

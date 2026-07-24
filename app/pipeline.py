@@ -9,6 +9,7 @@ from app.prompt_routing import (
     build_operator_summary,
     needs_web_research,
     normalize_prompt,
+    prompt_for_run_mode,
 )
 from app.agents import (
     run_arbitrator,
@@ -163,15 +164,18 @@ def _providers_used(settings: Settings, steps: list[AgentStep]) -> list[dict]:
                 "narrative": "Web intel with citations",
             }
         )
-    out.append(
-        {
-            "role": "Security Reviewer",
-            "provider": "Parasail" if settings.resolved_parasail_key() else "Rules engine",
-            "detail": reviewer.metadata.get("parasail_mode", "rules"),
-            "model": settings.parasail_model if settings.resolved_parasail_key() else None,
-            "narrative": "External inference / review",
-        }
-    )
+        out.append(
+            {
+                "role": "Security Reviewer",
+                "provider": "Parasail" if settings.resolved_parasail_key() else "Rules engine",
+                "detail": reviewer.metadata.get("parasail_mode", "rules"),
+                "model": settings.parasail_model if settings.resolved_parasail_key() else None,
+                "narrative": "External inference / review",
+            }
+        )
+    if reviewer.metadata.get("parasail_mode") == "skipped_no_web_research":
+        out[-1]["provider"] = "Rules engine"
+        out[-1]["detail"] = "skipped (status-only — Parasail not called)"
     out.append(
         {
             "role": "Arbitrator",
@@ -299,11 +303,24 @@ def _assemble_result(
         "web_research_ran": youcom_mode != "skipped_status_only",
         "session_id": session_id,
     }
+    data_sources = _data_sources(steps)
+    local_preview = ""
+    if local.status == "completed":
+        local_preview = str(local.metadata.get("preview") or local.summary or "")
     operator_summary = build_operator_summary(
         user_prompt,
         recommendation.recommended_action,
         recommendation.confidence,
+        data_sources=data_sources,
+        local_preview=local_preview,
     )
+    metrics["api_proof"] = {
+        "ralfia": data_sources.get("observer"),
+        "ollama": data_sources.get("local_analyst"),
+        "youcom": data_sources.get("research"),
+        "parasail_security": reviewer.metadata.get("parasail_mode"),
+        "parasail_arbitrator": arbitrator.metadata.get("parasail_mode"),
+    }
     return PipelineResult(
         correlation_id=cid,
         session_id=session_id,
@@ -330,15 +347,17 @@ async def run_pipeline(
     session_id: str = "",
     *,
     research_deeper: bool = False,
+    run_mode: str = "auto",
 ) -> PipelineResult:
     t0 = time.perf_counter()
     cid = correlation_id or "youcom-hackathon-liveops-20260724"
     prompt = normalize_prompt(user_prompt)
-    web = needs_web_research(prompt, force=research_deeper)
     observer = await run_observer(settings)
-    local = await run_local_analyst(settings, observer, user_prompt=prompt)
+    effective = prompt_for_run_mode(run_mode, prompt, observer.facts)
+    web = needs_web_research(effective, force=research_deeper, run_mode=run_mode)
+    local = await run_local_analyst(settings, observer, user_prompt=effective)
     research = await run_research(
-        settings, observer, user_prompt=prompt, skip_web=not web
+        settings, observer, user_prompt=effective, skip_web=not web
     )
     reviewer = await run_security_reviewer(settings, observer, research)
     arbitrator = await run_arbitrator(settings, observer, research, reviewer)
@@ -348,7 +367,7 @@ async def run_pipeline(
         session_id,
         [observer, local, research, reviewer, arbitrator],
         time.perf_counter() - t0,
-        prompt,
+        effective,
     )
 
 
@@ -359,12 +378,12 @@ async def stream_pipeline(
     session_id: str = "",
     *,
     research_deeper: bool = False,
+    run_mode: str = "auto",
 ) -> AsyncIterator[str]:
     """Server-Sent Events — data flow events + agent steps + final result."""
     t0 = time.perf_counter()
     cid = correlation_id or "youcom-hackathon-liveops-20260724"
     prompt = normalize_prompt(user_prompt)
-    web = needs_web_research(prompt, force=research_deeper)
     pending: list[str] = []
 
     def pack(event: str, payload: dict) -> str:
@@ -388,7 +407,9 @@ async def stream_pipeline(
             "event": HACKATHON_EVENT,
             "story": STORY,
             "user_prompt": prompt,
-            "web_research": web,
+            "web_research": None,
+            "run_mode": run_mode,
+            "phase": "observer",
             "research_deeper": research_deeper,
         },
     )
@@ -404,10 +425,22 @@ async def stream_pipeline(
     steps.append(observer)
     yield pack("agent_done", {"step": observer.model_dump()})
 
+    effective = prompt_for_run_mode(run_mode, prompt, observer.facts)
+    web = needs_web_research(effective, force=research_deeper, run_mode=run_mode)
+    yield pack(
+        "plan",
+        {
+            "correlation_id": cid,
+            "user_prompt": effective,
+            "web_research": web,
+            "run_mode": run_mode,
+        },
+    )
+
     yield pack("agent_start", {"agent": "local_analyst", "detail": "Ollama local OSS"})
     for chunk in drain():
         yield chunk
-    local = await run_local_analyst(settings, observer, emit=emit, user_prompt=prompt)
+    local = await run_local_analyst(settings, observer, emit=emit, user_prompt=effective)
     for chunk in drain():
         yield chunk
     steps.append(local)
@@ -417,7 +450,7 @@ async def stream_pipeline(
     for chunk in drain():
         yield chunk
     research = await run_research(
-        settings, observer, emit=emit, user_prompt=prompt, skip_web=not web
+        settings, observer, emit=emit, user_prompt=effective, skip_web=not web
     )
     for chunk in drain():
         yield chunk
@@ -443,7 +476,7 @@ async def stream_pipeline(
     yield pack("agent_done", {"step": arbitrator.model_dump()})
 
     result = _assemble_result(
-        settings, cid, session_id, steps, time.perf_counter() - t0, prompt
+        settings, cid, session_id, steps, time.perf_counter() - t0, effective
     )
     yield pack(
         "data_flow",

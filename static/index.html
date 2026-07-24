@@ -220,15 +220,24 @@
       border-radius: 10px; border-left: 3px solid var(--ok);
     }
     .chat-msg .who { font-size: .68rem; font-weight: 700; text-transform: uppercase; color: var(--muted); }
-    .live-panel {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-bottom: 1rem;
+    .live-panel { display: none; }
+    .api-trace-box {
+      margin-bottom: 1rem; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: .65rem .85rem;
     }
-    @media (max-width: 900px) { .live-panel { grid-template-columns: 1fr; } }
-    .live-panel .box {
-      background: var(--panel2); border: 1px solid var(--border); border-radius: 12px;
-      padding: .75rem .85rem; font-size: .82rem;
+    .api-trace-box h3 { margin: 0; font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .trace-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; align-items: center; margin-bottom: .4rem; }
+    .run-proof { font-size: .72rem; color: var(--ok); font-family: "JetBrains Mono", monospace; max-width: 70%; text-align: right; }
+    .api-trace {
+      margin: 0; max-height: 148px; overflow-y: auto; font-family: "JetBrains Mono", monospace;
+      font-size: .68rem; line-height: 1.4; color: #94a3b8; background: #020617;
+      border-radius: 8px; padding: .5rem .6rem; border: 1px solid var(--border); white-space: pre-wrap;
     }
-    .live-panel .box h3 { margin: 0 0 .35rem; font-size: .72rem; color: var(--muted); text-transform: uppercase; }
+    .api-trace .t-plan { color: #c4b5fd; }
+    .api-trace .t-req { color: #38bdf8; }
+    .api-trace .t-res { color: #34d399; }
+    .api-trace .t-skip { color: #fbbf24; }
+    .optional-feed { display: none; }
     .src-live { color: var(--ok); font-weight: 600; }
     .src-fix { color: var(--warn); font-weight: 600; }
     .stack-list { list-style: none; padding: 0; margin: .35rem 0 0; }
@@ -259,6 +268,38 @@
     .node-pulse.fix { background: var(--warn); animation: none; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
     details.tech-json summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
+    .cta-row {
+      display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .65rem; align-items: center;
+    }
+    .cta-row button.primary { flex: 1 1 180px; }
+    .cta-row button.secondary {
+      flex: 1 1 180px;
+      background: linear-gradient(135deg, #1e3a5f, #4338ca);
+      color: #e0e7ff;
+      box-shadow: 0 6px 18px rgba(99, 102, 241, .25);
+    }
+    .cta-row button.ghost-cta {
+      flex: 1 1 160px;
+      background: rgba(52, 211, 153, .12);
+      color: #a7f3d0;
+      border: 1px solid rgba(52, 211, 153, .35);
+    }
+    .incident-modal {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      background: rgba(0,0,0,.65); align-items: center; justify-content: center; padding: 1rem;
+    }
+    .incident-modal.open { display: flex; }
+    .incident-modal .panel {
+      max-width: 640px; width: 100%; max-height: 90vh; overflow: auto;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 1.1rem;
+    }
+    .incident-modal label { font-size: .75rem; color: var(--muted); display: block; margin: .5rem 0 .25rem; }
+    .incident-modal input, .incident-modal textarea {
+      width: 100%; font-family: inherit; background: #020617; border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: .5rem .6rem; font-size: .85rem;
+    }
+    .incident-modal textarea { min-height: 220px; font-family: "JetBrains Mono", monospace; font-size: .72rem; }
+    .incident-modal .modal-actions { display: flex; gap: .5rem; margin-top: .75rem; flex-wrap: wrap; }
   </style>
   <script>
     window.__LIVEOPS_BASE__ = (() => {
@@ -267,7 +308,7 @@
     })();
   </script>
   <script src="" id="liveopsI18nScript"></script>
-  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js';</script>
+  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=5';</script>
 </head>
 <body>
   <div class="wrap">
@@ -298,29 +339,22 @@
       <textarea id="promptInput" rows="3" data-i18n-placeholder="chatLabel"></textarea>
       <div class="command-row">
         <div class="chips" id="promptChips"></div>
-        <button type="button" class="primary" id="runBtn" data-i18n="runBtn"></button>
+      </div>
+      <div class="cta-row" aria-label="Demo flow">
+        <button type="button" class="primary" id="btnLiveStatus" data-i18n="ctaLiveStatus"></button>
+        <button type="button" class="secondary" id="btnInvestigate" data-i18n="ctaInvestigate"></button>
+        <button type="button" class="ghost-cta" id="btnGitHubIncident" data-i18n="ctaGitHub" disabled></button>
       </div>
       <div class="chat-log" id="chatLog"></div>
     </section>
 
-    <div class="live-panel" id="livePanel">
-      <div class="box">
-        <h3 data-i18n="liveNodesTitle">Live nodes snapshot</h3>
-        <div id="liveNodes">Loading…</div>
+    <section class="api-trace-box" aria-live="polite">
+      <div class="trace-head">
+        <h3 data-i18n="traceTitle">Live API trace</h3>
+        <span id="runProof" class="run-proof"></span>
       </div>
-      <div class="box">
-        <h3 data-i18n="dataSourcesTitle">Used in this run</h3>
-        <div id="dataSources">Run an analysis to see live vs fixture labels.</div>
-        <div class="stack-section" id="modelsUsedBlock"></div>
-        <div class="stack-section" id="modelsAvailBlock"></div>
-      </div>
-      <div class="box">
-        <h3 data-i18n="hybridStackTitle">Hybrid intelligence stack</h3>
-        <ul class="stack-list" id="stackList">
-          <li>RalfIA Observer · Local Analyst · You.com · Parasail · Human</li>
-        </ul>
-      </div>
-    </div>
+      <div id="apiTrace" class="api-trace" data-i18n="traceEmpty">Send a question — each line is a real outbound call (or an explicit skip).</div>
+    </section>
 
     <div id="errorBanner"></div>
     <div id="progressBar"><span id="progressFill"></span></div>
@@ -355,7 +389,7 @@
       <div class="pipe-step" data-agent="human"><div class="name">Human</div><div class="state">Final control</div></div>
     </div>
 
-    <div class="layout">
+    <div class="layout optional-feed">
       <section class="feed" id="activityFeed" aria-live="polite">
         <h2 data-i18n="feedTitle"></h2>
         <div class="feed-empty" id="feedEmpty" data-i18n="feedEmpty"></div>
@@ -387,6 +421,22 @@
       <h3 style="margin:0 0 .5rem;font-size:.9rem" data-i18n="opseraTitle">Built &amp; reviewed with</h3>
       <p id="buildReviewBody" style="margin:0;line-height:1.45">…</p>
     </section>
+
+    <div class="incident-modal" id="incidentModal" role="dialog" aria-modal="true">
+      <div class="panel">
+        <h3 style="margin:0 0 .35rem" data-i18n="incidentModalTitle"></h3>
+        <p style="margin:0 0 .5rem;font-size:.82rem;color:var(--muted)" data-i18n="incidentModalHint"></p>
+        <label for="issueTitle" data-i18n="issueTitleLabel"></label>
+        <input id="issueTitle" type="text" />
+        <label for="issueBody" data-i18n="issueBodyLabel"></label>
+        <textarea id="issueBody"></textarea>
+        <p id="issueCreateMsg" style="font-size:.8rem;margin:.5rem 0 0"></p>
+        <div class="modal-actions">
+          <button type="button" class="primary" id="issueCreateBtn" data-i18n="issueCreateBtn"></button>
+          <button type="button" class="ghost" id="issueCancelBtn" data-i18n="issueCancelBtn"></button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -414,11 +464,16 @@
     }
 
     const agentsEl = document.getElementById('agents');
-    const runBtn = document.getElementById('runBtn');
+    const btnLiveStatus = document.getElementById('btnLiveStatus');
+    const btnInvestigate = document.getElementById('btnInvestigate');
+    const btnGitHubIncident = document.getElementById('btnGitHubIncident');
+    const incidentModal = document.getElementById('incidentModal');
     const errorBanner = document.getElementById('errorBanner');
     const progressFill = document.getElementById('progressFill');
     const pipelineRail = document.getElementById('pipelineRail');
     const verdictPanel = document.getElementById('verdictPanel');
+    const apiTrace = document.getElementById('apiTrace');
+    const runProof = document.getElementById('runProof');
     const activityFeed = document.getElementById('activityFeed');
     const feedEmpty = document.getElementById('feedEmpty');
     const promptInput = document.getElementById('promptInput');
@@ -449,6 +504,35 @@
       const d = document.createElement('div');
       d.textContent = s == null ? '' : String(s);
       return d.innerHTML;
+    }
+
+    function clearTrace() {
+      apiTrace.innerHTML = '';
+      apiTrace.textContent = t('traceEmpty');
+      runProof.textContent = '';
+    }
+
+    function appendTraceLine(text, cls) {
+      const ts = new Date().toLocaleTimeString();
+      const line = document.createElement('div');
+      line.className = cls || '';
+      line.textContent = `[${ts}] ${text}`;
+      if (!apiTrace.querySelector('div')) apiTrace.textContent = '';
+      apiTrace.appendChild(line);
+      apiTrace.scrollTop = apiTrace.scrollHeight;
+    }
+
+    function appendTraceFromFlow(d) {
+      const kind = d.kind || '';
+      const transport = d.transport || '';
+      if (kind === 'request') {
+        appendTraceLine('→ ' + (transport || d.title), 't-req');
+      } else if (kind === 'response') {
+        const mode = d.payload && d.payload.mode ? ` (${d.payload.mode})` : '';
+        appendTraceLine('← ' + d.title + mode, 't-res');
+      } else if (kind === 'checkpoint') {
+        appendTraceLine('○ ' + d.title + ' — ' + (d.explain || ''), 't-skip');
+      }
     }
 
     function showError(msg) {
@@ -646,11 +730,15 @@
       }
       document.getElementById('elapsedMeta').textContent =
         `${t('lastRun')} ${m.time_to_recommendation_sec}s · ${t('youcomMode')} ${data.youcom_mode}`;
-      renderDataSources(data.data_sources);
-      renderStack(data.providers_used);
-      renderModelsUsed(data.models_used);
+      const proof = m.api_proof || {};
+      runProof.textContent = [
+        proof.ralfia,
+        proof.ollama,
+        proof.youcom,
+        proof.parasail_security ? 'Sec:' + proof.parasail_security : '',
+        proof.parasail_arbitrator ? 'Arb:' + proof.parasail_arbitrator : '',
+      ].filter(Boolean).join(' · ');
       renderCitationCards(rec.citations);
-      if (data.live_nodes) renderLiveNodes({ nodes: { amd_5: data.live_nodes.node_amd_5 }, ralfia_probe: data.live_nodes.ralfia_gateway });
       appendChat('LiveOps', data.operator_summary || rec.recommended_action, 'ops');
     }
 
@@ -714,11 +802,31 @@
     }
 
     function dispatchStreamEvent(event, data) {
-      if (event === 'data_flow') appendFlow(data);
-      else if (event === 'start') {
+      if (event === 'data_flow') {
+        appendFlow(data);
+        appendTraceFromFlow(data);
+        setProgress(Math.min(95, 10 + streamStepCount * 12));
+      } else if (event === 'plan') {
+        appendTraceLine(
+          'PLAN web_research=' + (data.web_research ? 'YES' : 'NO') +
+            ' · mode=' + (data.run_mode || 'auto') +
+            ' · ' + (data.user_prompt || '').slice(0, 72),
+          't-plan'
+        );
+      } else if (event === 'start') {
+        appendTraceLine(
+          'START phase=' + (data.phase || 'pipeline') + ' · run_mode=' + (data.run_mode || 'auto'),
+          't-plan'
+        );
         if (data.story && data.story.problem) {
           document.getElementById('storyProblem').textContent =
             data.story.problem + ' ' + (data.story.why_multi_agent || '');
+        }
+        if (data.web_research !== null && data.web_research !== undefined) {
+          appendTraceLine(
+            'PLAN You.com web research = ' + (data.web_research ? 'YES' : 'NO (status-only)'),
+            't-plan'
+          );
         }
         appendFlow({
           agent: 'system',
@@ -738,9 +846,18 @@
         setProgress(Math.min(95, 15 + streamStepCount * 18));
       } else if (event === 'complete') {
         renderVerdict(data.result);
+        const proof = (data.result.metrics || {}).api_proof || {};
+        appendTraceLine(
+          'DONE · ' +
+            [proof.ralfia, proof.ollama, proof.youcom, proof.parasail_security, proof.parasail_arbitrator]
+              .filter(Boolean)
+              .join(' | '),
+          't-res'
+        );
         markRailDone('human');
         setProgress(100);
         streamFinished = true;
+        btnGitHubIncident.disabled = false;
       }
     }
 
@@ -755,11 +872,28 @@
       dispatchStreamEvent(event, JSON.parse(dataLine));
     }
 
-    async function runStream(researchDeeper) {
+    function setCtaBusy(busy) {
+      [btnLiveStatus, btnInvestigate].forEach(b => {
+        b.disabled = busy;
+        if (busy) b.textContent = t('stateRunning');
+      });
+      if (!busy) {
+        btnLiveStatus.textContent = t('ctaLiveStatus');
+        btnInvestigate.textContent = t('ctaInvestigate');
+      }
+    }
+
+    async function runStream(runMode, researchDeeper) {
       clearError();
       streamFinished = false;
-      runBtn.disabled = true;
-      runBtn.textContent = t('stateRunning');
+      setCtaBusy(true);
+      clearTrace();
+      if (runMode === 'status_only' && !getPrompt().trim()) {
+        promptInput.value = t('promptLiveStatus');
+      }
+      if (runMode === 'investigate' && !getPrompt().trim()) {
+        promptInput.value = t('promptInvestigate');
+      }
       lastUserPrompt = getPrompt();
       appendChat('You', lastUserPrompt, 'user');
       agentsEl.innerHTML = '';
@@ -793,6 +927,7 @@
             prompt: lastUserPrompt,
             session_id: sessionId,
             research_deeper: !!researchDeeper,
+            run_mode: runMode || 'auto',
           }),
         });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -816,8 +951,56 @@
           setProgress(0);
         }
       } finally {
-        runBtn.disabled = false;
-        runBtn.textContent = t('runBtn');
+        setCtaBusy(false);
+      }
+    }
+
+    async function openIncidentPreview() {
+      document.getElementById('issueCreateMsg').textContent = '';
+      try {
+        const r = await fetch(BASE + '/api/incident/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'preview failed');
+        document.getElementById('issueTitle').value = data.draft.title || '';
+        document.getElementById('issueBody').value = data.draft.body || '';
+        incidentModal.classList.add('open');
+      } catch (e) {
+        showError(t('errIncidentPreview') + ' ' + e.message);
+      }
+    }
+
+    async function createIncidentFromPreview() {
+      const title = document.getElementById('issueTitle').value.trim();
+      const body = document.getElementById('issueBody').value.trim();
+      const msg = document.getElementById('issueCreateMsg');
+      msg.style.color = 'var(--muted)';
+      msg.textContent = t('stateRunning');
+      try {
+        const r = await fetch(BASE + '/api/incident/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            title,
+            body,
+            human_approval: 'approved',
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'create failed');
+        const url = data.issue && data.issue.html_url;
+        msg.style.color = 'var(--ok)';
+        msg.innerHTML = url
+          ? t('issueCreated') + ' <a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>'
+          : JSON.stringify(data.issue);
+        appendTraceLine('GITHUB ISSUE · via ' + (data.issue.via || '?') + ' · ' + (url || ''), 't-res');
+      } catch (e) {
+        msg.style.color = 'var(--danger)';
+        msg.textContent = e.message;
       }
     }
 
@@ -859,7 +1042,7 @@
     promptInput.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter' && !ev.shiftKey) {
         ev.preventDefault();
-        runStream(false);
+        runStream('status_only', false);
       }
     });
 
@@ -868,24 +1051,28 @@
         setTimeout(bootI18n, 30);
         return;
       }
+      if (!localStorage.getItem('liveops_lang')) LiveOpsI18n.setLang('en');
       applyLangUI();
       document.getElementById('langEn').onclick = () => LiveOpsI18n.setLang('en');
       document.getElementById('langEs').onclick = () => LiveOpsI18n.setLang('es');
       document.addEventListener('liveops:lang', () => applyLangUI());
     }
 
-    runBtn.onclick = () => runStream(false);
+    btnLiveStatus.onclick = () => runStream('status_only', false);
+    btnInvestigate.onclick = () => runStream('investigate', false);
+    btnGitHubIncident.onclick = () => openIncidentPreview();
+    document.getElementById('issueCancelBtn').onclick = () => incidentModal.classList.remove('open');
+    document.getElementById('issueCreateBtn').onclick = () => createIncidentFromPreview();
     document.getElementById('incidentBtn').onclick = () => {
-      promptInput.value = DEFAULT_INCIDENT;
-      runStream(false);
+      promptInput.value = t('promptInvestigate');
+      runStream('investigate', false);
     };
     document.getElementById('probeBtn').onclick = quickProbe;
     document.getElementById('approveBtn').onclick = () => decide('approve');
     document.getElementById('rejectBtn').onclick = () => decide('reject');
-    document.getElementById('deeperBtn').onclick = () => decide('research_deeper');
+    document.getElementById('deeperBtn').onclick = () => runStream('investigate', true);
     loadHealth();
     loadStory();
-    loadLiveNodes();
     loadBuildReview();
     bootI18n();
   </script>

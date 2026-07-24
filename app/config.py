@@ -25,12 +25,36 @@ class Settings(BaseSettings):
     liveops_whatsapp_contact_ref: str = ""
     liveops_whatsapp_number: str = ""
     ralfia_openai_root: str = "/home/rlopez/projects/raphiia-openai"
+    ralfia_status_url: str = ""
+    github_repo_owner: str = "Rafa-Innerchispa"
+    github_repo_name: str = "ralphiia-liveops-intelligence"
+    github_token: str = ""
+    one_secret: str = ""
+    deploy_surface: str = "local"  # local | render
+
+    def resolved_one_secret(self) -> str:
+        return os.getenv("ONE_SECRET", "") or self.one_secret
+
+    def resolved_github_token(self) -> str:
+        return os.getenv("GITHUB_TOKEN", "") or self.github_token
+
+    def ralfia_status_endpoint(self) -> str:
+        return (
+            os.getenv("RALFIA_STATUS_URL", "").strip()
+            or self.ralfia_status_url.strip()
+            or "http://127.0.0.1:8101/status"
+        )
+
+    def deployment_info(self) -> dict:
+        return {
+            "surface": os.getenv("DEPLOY_SURFACE", self.deploy_surface),
+            "ralfia_probe": self.ralfia_status_endpoint().split("?")[0],
+            "ralfia_redacted": "127.0.0.1" not in self.ralfia_status_endpoint()
+            and "192.168." not in self.ralfia_status_endpoint(),
+        }
 
     def resolved_parasail_key(self) -> str:
-        return (
-            os.getenv("PARASAIL_API_KEY", "")
-            or self.parasail_api_key
-        )
+        return os.getenv("PARASAIL_API_KEY", "") or self.parasail_api_key
 
     def parasail_status(self) -> dict:
         if self.resolved_parasail_key():

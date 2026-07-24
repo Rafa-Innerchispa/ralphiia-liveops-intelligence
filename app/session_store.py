@@ -96,6 +96,30 @@ def record_assistant_summary(session_id: str, summary: str) -> None:
         append_message(session_id, "assistant", summary[:2000])
 
 
+def save_pipeline_result(session_id: str, result: dict) -> None:
+    with _lock:
+        bucket = _sessions.setdefault(session_id, {"messages": []})
+        bucket["last_pipeline"] = result
+        _save()
+
+
+def get_pipeline_result(session_id: str) -> dict | None:
+    with _lock:
+        bucket = _sessions.get(session_id) or {}
+        raw = bucket.get("last_pipeline")
+        return raw if isinstance(raw, dict) else None
+
+
+def get_observer_facts_from_session(session_id: str) -> list[str]:
+    raw = get_pipeline_result(session_id)
+    if not raw:
+        return []
+    for step in raw.get("steps") or []:
+        if step.get("agent") == "observer":
+            return list(step.get("facts") or [])
+    return []
+
+
 def reset_all_sessions_for_tests() -> None:
     """In-memory only — used by pytest autouse fixture."""
     global _sessions

@@ -409,66 +409,80 @@ async def run_security_reviewer(
     llm = ParasailClient(settings)
     verdict = _security_rules(observer, research)
     llm_mode = "rules"
-    await _flow(
-        emit,
-        {
-            "agent": "security_reviewer",
-            "kind": "request",
-            "title": "Paso 3 · Security Reviewer (Parasail)",
-            "explain": (
-                "Recibe hechos del Observer + informe/citas de You.com. "
-                "Decide si alguna acción operativa estaría justificada (dry-run)."
-            ),
-            "transport": f"POST {settings.parasail_base_url}/chat/completions",
-            "payload": {
-                "model": settings.parasail_model,
-                "citations_in": len(research.citations),
+    status_only = research.status == "skipped"
+    if status_only:
+        await _flow(
+            emit,
+            {
+                "agent": "security_reviewer",
+                "kind": "checkpoint",
+                "title": "Security · rules only",
+                "explain": "You.com was not used — Parasail skipped; local rules enforce dry-run.",
+                "transport": "rules engine (no Parasail HTTP)",
+                "payload": {"approved": verdict.approved},
             },
-        },
-    )
-    if llm.configured():
-        cite_lines = [
-            f"- {c.title} ({c.url})" for c in research.citations[:8]
-        ]
-        user = (
-            "Incident facts:\n"
-            + "\n".join(f"- {f}" for f in observer.facts)
-            + "\nResearch:\n"
-            + "\n".join(f"- {f}" for f in research.facts[:6])
-            + "\nCitations:\n"
-            + "\n".join(cite_lines)
-            + "\nReturn JSON: approved (bool), blocked_actions (array), reasons (array)."
         )
-        system = (
-            "You are Security Reviewer in a LiveOps multi-agent system. "
-            "Reject restart/recover/delete without strong cited evidence. "
-            "Production is dry-run only. Output JSON only."
-        )
-        try:
-            text, llm_mode = await llm.chat(system, user, max_tokens=500)
-            parsed = ParasailClient.parse_json_block(text)
-            if "approved" in parsed:
-                verdict = SecurityVerdict(
-                    approved=bool(parsed.get("approved")),
-                    blocked_actions=list(parsed.get("blocked_actions") or []),
-                    reasons=list(parsed.get("reasons") or ["Parasail review"]),
-                )
-        except Exception:
-            llm_mode = "rules_fallback"
-
-    await _flow(
-        emit,
-        {
-            "agent": "security_reviewer",
-            "kind": "response",
-            "title": f"Veredicto seguridad · approved={verdict.approved}",
-            "explain": "; ".join(verdict.reasons[:3]) or "Revisión completada.",
-            "payload": {
-                "parasail_mode": llm_mode,
-                "security": verdict.model_dump(),
+        llm_mode = "skipped_no_web_research"
+    else:
+        await _flow(
+            emit,
+            {
+                "agent": "security_reviewer",
+                "kind": "request",
+                "title": "Security Reviewer · Parasail HTTP",
+                "explain": (
+                    "POST chat/completions with Observer facts + You.com citations."
+                ),
+                "transport": f"POST {settings.parasail_base_url}/chat/completions",
+                "payload": {
+                    "model": settings.parasail_model,
+                    "citations_in": len(research.citations),
+                },
             },
-        },
-    )
+        )
+        if llm.configured():
+            cite_lines = [
+                f"- {c.title} ({c.url})" for c in research.citations[:8]
+            ]
+            user = (
+                "Incident facts:\n"
+                + "\n".join(f"- {f}" for f in observer.facts)
+                + "\nResearch:\n"
+                + "\n".join(f"- {f}" for f in research.facts[:6])
+                + "\nCitations:\n"
+                + "\n".join(cite_lines)
+                + "\nReturn JSON: approved (bool), blocked_actions (array), reasons (array)."
+            )
+            system = (
+                "You are Security Reviewer in a LiveOps multi-agent system. "
+                "Reject restart/recover/delete without strong cited evidence. "
+                "Production is dry-run only. Output JSON only."
+            )
+            try:
+                text, llm_mode = await llm.chat(system, user, max_tokens=500)
+                parsed = ParasailClient.parse_json_block(text)
+                if "approved" in parsed:
+                    verdict = SecurityVerdict(
+                        approved=bool(parsed.get("approved")),
+                        blocked_actions=list(parsed.get("blocked_actions") or []),
+                        reasons=list(parsed.get("reasons") or ["Parasail review"]),
+                    )
+            except Exception:
+                llm_mode = "rules_fallback"
+        await _flow(
+            emit,
+            {
+                "agent": "security_reviewer",
+                "kind": "response",
+                "title": f"Security response · approved={verdict.approved}",
+                "explain": f"Parasail mode={llm_mode}",
+                "transport": f"POST {settings.parasail_base_url}/chat/completions",
+                "payload": {
+                    "parasail_mode": llm_mode,
+                    "security": verdict.model_dump(),
+                },
+            },
+        )
 
     return AgentStep(
         agent=AgentName.security_reviewer,
@@ -520,57 +534,74 @@ async def run_arbitrator(
     risk_level = "medium"
     llm_mode = "rules"
     llm = ParasailClient(settings)
-    await _flow(
-        emit,
-        {
-            "agent": "arbitrator",
-            "kind": "request",
-            "title": "Paso 4 · Arbitrator (Parasail)",
-            "explain": (
-                "Fusiona observación + research citado + veredicto de seguridad "
-                "en una recomendación final para el operador humano."
-            ),
-            "transport": f"POST {settings.parasail_base_url}/chat/completions",
-        },
-    )
-    if llm.configured():
-        user = (
-            f"Observer: {observer.facts}\nResearch: {research.facts[:4]}\n"
-            f"Security approved={security.approved}, reasons={security.reasons}\n"
-            "Synthesize final JSON: recommended_action, confidence (0-1), risk_level, "
-            "requires_approval=true, dry_run=true."
+    status_only = research.status == "skipped"
+    if status_only:
+        confidence = 0.82
+        recommendation = (
+            "Based on live RalfIA read-only probe only (You.com not invoked): "
+            + " ".join(observer.facts[:2])
+            + " Continue dry-run monitoring; no production changes."
         )
-        system = (
-            "You are Arbitrator agent. Merge You.com research + security review. "
-            "Never recommend production restart without human approval."
-        )
-        try:
-            text, llm_mode = await llm.chat(system, user, max_tokens=600)
-            parsed = ParasailClient.parse_json_block(text)
-            if parsed.get("recommended_action"):
-                recommendation = str(parsed["recommended_action"])
-            if parsed.get("confidence") is not None:
-                confidence = float(parsed["confidence"])
-            if parsed.get("risk_level"):
-                risk_level = str(parsed["risk_level"])
-        except Exception:
-            llm_mode = "rules_fallback"
-
-    await _flow(
-        emit,
-        {
-            "agent": "arbitrator",
-            "kind": "response",
-            "title": "Recomendación lista",
-            "explain": recommendation,
-            "payload": {
-                "parasail_mode": llm_mode,
-                "confidence": confidence,
-                "risk_level": risk_level,
-                "recommended_action": recommendation,
+        llm_mode = "skipped_no_web_research"
+        await _flow(
+            emit,
+            {
+                "agent": "arbitrator",
+                "kind": "checkpoint",
+                "title": "Arbitrator · rules (status-only)",
+                "explain": "Parasail skipped — answer synthesized from Observer + Local Analyst only.",
+                "transport": "rules engine (no Parasail HTTP)",
+                "payload": {"recommended_action": recommendation[:200]},
             },
-        },
-    )
+        )
+    else:
+        await _flow(
+            emit,
+            {
+                "agent": "arbitrator",
+                "kind": "request",
+                "title": "Arbitrator · Parasail HTTP",
+                "explain": "Merge You.com research + security into final recommendation.",
+                "transport": f"POST {settings.parasail_base_url}/chat/completions",
+            },
+        )
+        if llm.configured():
+            user = (
+                f"Observer: {observer.facts}\nResearch: {research.facts[:4]}\n"
+                f"Security approved={security.approved}, reasons={security.reasons}\n"
+                "Synthesize final JSON: recommended_action, confidence (0-1), risk_level, "
+                "requires_approval=true, dry_run=true."
+            )
+            system = (
+                "You are Arbitrator agent. Merge You.com research + security review. "
+                "Never recommend production restart without human approval."
+            )
+            try:
+                text, llm_mode = await llm.chat(system, user, max_tokens=600)
+                parsed = ParasailClient.parse_json_block(text)
+                if parsed.get("recommended_action"):
+                    recommendation = str(parsed["recommended_action"])
+                if parsed.get("confidence") is not None:
+                    confidence = float(parsed["confidence"])
+                if parsed.get("risk_level"):
+                    risk_level = str(parsed["risk_level"])
+            except Exception:
+                llm_mode = "rules_fallback"
+        await _flow(
+            emit,
+            {
+                "agent": "arbitrator",
+                "kind": "response",
+                "title": "Arbitrator response",
+                "explain": recommendation[:240],
+                "transport": f"POST {settings.parasail_base_url}/chat/completions",
+                "payload": {
+                    "parasail_mode": llm_mode,
+                    "confidence": confidence,
+                    "risk_level": risk_level,
+                },
+            },
+        )
 
     return AgentStep(
         agent=AgentName.arbitrator,

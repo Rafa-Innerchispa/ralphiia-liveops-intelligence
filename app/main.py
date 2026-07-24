@@ -11,7 +11,15 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.local_analyst import AVAILABLE_LOCAL_MODELS, resolve_local_analyst_model
-from app.models import AnalyzeRequest, HealthResponse, HumanDecisionRequest, PipelineResult
+from app.models import (
+    AnalyzeRequest,
+    HealthResponse,
+    HumanDecisionRequest,
+    IncidentCreateRequest,
+    IncidentPreviewRequest,
+    PipelineResult,
+)
+from app.incident import build_issue_draft, create_github_incident
 from app.notify import schedule_analysis_notify
 from app.pipeline import (
     HACKATHON_EVENT,
@@ -25,9 +33,11 @@ from app.prompt_routing import normalize_prompt
 from app.parasail_client import ParasailClient
 from app.ralfia_client import fetch_live_status
 from app.session_store import (
+    get_pipeline_result,
     merge_prompt_with_session,
     record_assistant_summary,
     reset_all_sessions_for_tests,
+    save_pipeline_result,
 )
 from app.youcom_client import YouComClient
 
@@ -92,11 +102,12 @@ def _notify_complete(settings, cid: str, prompt: str, summary: str | None) -> No
     )
 
 
-def _prepare_analysis(body: AnalyzeRequest | None) -> tuple[str, str, str, bool]:
+def _prepare_analysis(body: AnalyzeRequest | None) -> tuple[str, str, str, bool, str]:
     global _last_prompt, _last_session_id
     settings = get_settings()
     raw = (body.prompt if body else "") or ""
     research_deeper = bool(body and body.research_deeper)
+    run_mode = (body.run_mode if body else "auto") or "auto"
     session_id, prompt = merge_prompt_with_session(
         body.session_id if body else None,
         normalize_prompt(raw or None),
@@ -105,7 +116,7 @@ def _prepare_analysis(body: AnalyzeRequest | None) -> tuple[str, str, str, bool]
     _last_prompt = prompt
     _last_session_id = session_id
     cid = _correlation_id(body.correlation_id if body else None)
-    return prompt, session_id, cid, research_deeper
+    return prompt, session_id, cid, research_deeper, run_mode
 
 
 @app.get("/")
@@ -198,6 +209,21 @@ async def health() -> HealthResponse:
     )
 
 
+@app.get("/api/deployment")
+async def deployment() -> dict:
+    settings = get_settings()
+    info = settings.deployment_info()
+    info["one_configured"] = bool(settings.resolved_one_secret())
+    info["github_repo"] = (
+        f"{settings.github_repo_owner}/{settings.github_repo_name}"
+        if settings.github_repo_owner and settings.github_repo_name
+        else None
+    )
+    info["github_token_configured"] = bool(settings.resolved_github_token())
+    info["ngrok_fallback"] = settings.liveops_public_url
+    return info
+
+
 @app.get("/api/analyze/stream")
 async def analyze_stream_get(
     prompt: str | None = Query(default=None, max_length=4000),
@@ -210,6 +236,7 @@ async def analyze_stream_get(
         correlation_id=correlation_id,
         session_id=session_id,
         research_deeper=research_deeper,
+        run_mode="auto",
     )
     return await _analyze_stream_response(body)
 
@@ -221,7 +248,7 @@ async def analyze_stream_post(body: AnalyzeRequest | None = None) -> StreamingRe
 
 async def _analyze_stream_response(body: AnalyzeRequest) -> StreamingResponse:
     settings = get_settings()
-    prompt, session_id, cid, research_deeper = _prepare_analysis(body)
+    prompt, session_id, cid, research_deeper, run_mode = _prepare_analysis(body)
     _notify_start(settings, cid, prompt)
 
     async def event_source():
@@ -232,6 +259,7 @@ async def _analyze_stream_response(body: AnalyzeRequest) -> StreamingResponse:
             user_prompt=prompt,
             session_id=session_id,
             research_deeper=research_deeper,
+            run_mode=run_mode,
         ):
             yield chunk
             if chunk.startswith("event: complete\n"):
@@ -241,6 +269,9 @@ async def _analyze_stream_response(body: AnalyzeRequest) -> StreamingResponse:
                     if line.startswith("data: "):
                         payload = _json.loads(line[6:])
                         _last_result = PipelineResult.model_validate(payload["result"])
+                        save_pipeline_result(
+                            session_id, _last_result.model_dump()
+                        )
                         record_assistant_summary(
                             session_id, _last_result.operator_summary or ""
                         )
@@ -267,7 +298,7 @@ async def _analyze_stream_response(body: AnalyzeRequest) -> StreamingResponse:
 async def analyze(body: AnalyzeRequest | None = None) -> PipelineResult:
     global _last_result
     settings = get_settings()
-    prompt, session_id, cid, research_deeper = _prepare_analysis(body or AnalyzeRequest())
+    prompt, session_id, cid, research_deeper, run_mode = _prepare_analysis(body or AnalyzeRequest())
     _notify_start(settings, cid, prompt)
     result = await run_pipeline(
         settings,
@@ -275,16 +306,70 @@ async def analyze(body: AnalyzeRequest | None = None) -> PipelineResult:
         user_prompt=prompt,
         session_id=session_id,
         research_deeper=research_deeper,
+        run_mode=run_mode,
     )
     _last_result = result
+    save_pipeline_result(session_id, result.model_dump())
     record_assistant_summary(session_id, result.operator_summary or "")
     _notify_complete(settings, cid, prompt, result.operator_summary or None)
     return result
 
 
 @app.get("/api/last", response_model=PipelineResult | None)
-async def last_result() -> PipelineResult | None:
+async def last_result(session_id: str | None = Query(default=None)) -> PipelineResult | None:
+    if session_id:
+        raw = get_pipeline_result(session_id)
+        if raw:
+            return PipelineResult.model_validate(raw)
     return _last_result
+
+
+def _result_for_incident(session_id: str | None) -> PipelineResult:
+    if session_id:
+        raw = get_pipeline_result(session_id)
+        if raw:
+            return PipelineResult.model_validate(raw)
+    if _last_result is None:
+        raise HTTPException(400, "Run Check Live Status or Investigate first")
+    return _last_result
+
+
+@app.post("/api/incident/preview")
+async def incident_preview(body: IncidentPreviewRequest | None = None) -> dict:
+    body = body or IncidentPreviewRequest()
+    result = _result_for_incident(body.session_id or _last_session_id)
+    draft = build_issue_draft(
+        result,
+        title_override=body.title,
+        body_override=body.body,
+        human_approval="preview",
+    )
+    settings = get_settings()
+    return {
+        "draft": draft,
+        "one_configured": bool(settings.resolved_one_secret()),
+        "github_fallback": bool(settings.resolved_github_token()),
+        "repo": f"{settings.github_repo_owner}/{settings.github_repo_name}"
+        if settings.github_repo_owner
+        else None,
+    }
+
+
+@app.post("/api/incident/create")
+async def incident_create(body: IncidentCreateRequest) -> dict:
+    result = _result_for_incident(body.session_id or _last_session_id)
+    settings = get_settings()
+    draft = build_issue_draft(
+        result,
+        title_override=body.title,
+        body_override=body.body,
+        human_approval=body.human_approval,
+    )
+    try:
+        created = await create_github_incident(settings, draft)
+    except Exception as exc:
+        raise HTTPException(502, str(exc)[:400]) from exc
+    return {"ok": True, "issue": created, "draft_title": draft["title"]}
 
 
 @app.post("/api/decision")

@@ -68,7 +68,7 @@ async def fetch_live_status(settings: Settings) -> dict:
         }
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get("http://127.0.0.1:8101/status")
+            resp = await client.get(settings.ralfia_status_endpoint())
             if resp.status_code == 200:
                 data = resp.json()
                 sanitized = _sanitize_status_payload(data)

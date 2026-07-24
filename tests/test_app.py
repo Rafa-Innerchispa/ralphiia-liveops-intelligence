@@ -35,12 +35,28 @@ async def test_analyze_status_only_skips_youcom():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(
             "/api/analyze",
-            json={"prompt": "What is unhealthy right now on RalfIA status 8101?"},
+            json={
+                "prompt": "What is unhealthy right now on RalfIA status 8101?",
+                "run_mode": "status_only",
+            },
         )
     assert resp.status_code == 200
     data = resp.json()
     assert data["youcom_mode"] == "skipped_status_only"
     assert data["metrics"]["web_research_ran"] is False
+
+
+@pytest.mark.asyncio
+async def test_analyze_investigate_forces_web():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/analyze",
+            json={"prompt": "check servers", "run_mode": "investigate"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["metrics"]["web_research_ran"] is True
 
 
 @pytest.mark.asyncio
@@ -54,6 +70,29 @@ async def test_analyze_pipeline():
     assert data["recommendation"]["requires_approval"] is True
     assert data["recommendation"]["dry_run"] is True
     assert data["metrics"]["citation_coverage"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_incident_preview_after_analyze():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/api/analyze", json={"run_mode": "status_only"})
+        resp = await client.post("/api/incident/preview", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "draft" in body
+    assert body["draft"]["title"]
+
+
+@pytest.mark.asyncio
+async def test_incident_preview_requires_run():
+    from app.main import reset_liveops_session
+
+    reset_liveops_session()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/incident/preview", json={})
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
+from app.provenance import MAX_YOUCOM_SEARCH_CHARS
 
 
 class YouComMcpClient:
@@ -79,7 +80,7 @@ class YouComMcpClient:
         mode = "mcp_live" if self.api_key else "mcp_free"
         result = await self.call_tool(
             "you-search",
-            {"query": query, "count": count, "freshness": "month"},
+            {"query": query[:MAX_YOUCOM_SEARCH_CHARS], "count": min(count, 5)},
         )
         text = self._text_blocks(result)
         hits = _parse_search_text(text)[:count]

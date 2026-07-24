@@ -4,18 +4,23 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from app.models import AgentName, AgentStep, Citation, SecurityVerdict
+from app.incident_run import (
+    derive_incident_id,
+    hypotheses_for_run,
+    rules_fallback_recommendation,
+)
 from app.provenance import (
     build_sanitized_research_query,
+    build_sanitized_search_query,
     canonical_citations,
     observer_facts_from_snap,
     sanitize_operator_prompt,
 )
 from app.prompt_routing import INVESTIGATE_DEFAULT_PROMPT, STATUS_DEFAULT_PROMPT
-from app.ralfia_client import fetch_live_status, INCIDENT_FIXTURE
+from app.ralfia_client import fetch_live_status
 from app.ops_brief import (
     build_status_only_recommendation,
     format_service_status_block,
-    merge_recommendation_with_snapshot,
     service_matrix_from_snapshot,
 )
 from app.youcom_client import YouComClient
@@ -87,10 +92,8 @@ async def run_observer(settings: Settings, emit: DataEmitter = None) -> AgentSte
     source_label = snap.get("source_label") or snap.get("source", "unknown")
     observed, demo = observer_facts_from_snap(snap, matrix)
     facts = observed + demo
-    hypotheses = [
-        "Session or number block on WhatsApp line (operator-reported).",
-        "Health probe mismatch while systemd unit remains active.",
-    ]
+    hypotheses = hypotheses_for_run(snap, matrix)
+    incident_id = derive_incident_id(snap, matrix)
     obs_status = "failed" if source == "live_unavailable" else "completed"
     return AgentStep(
         agent=AgentName.observer,
@@ -110,6 +113,7 @@ async def run_observer(settings: Settings, emit: DataEmitter = None) -> AgentSte
             "dry_run": True,
             "demo_context": demo,
             "observed_facts": observed,
+            "incident_id": incident_id,
             "snap": {
                 "node_label": snap.get("node_label"),
                 "service": snap.get("service"),
@@ -266,6 +270,7 @@ async def run_research(
     client = YouComClient(settings)
     observed = observer.metadata.get("observed_facts") or observer.facts[:8]
     demo = observer.metadata.get("demo_context") or []
+    search_query = build_sanitized_search_query(user_prompt or "", observed, demo)
     query = build_sanitized_research_query(user_prompt or "", observed, demo)
     await _flow(
         emit,
@@ -278,10 +283,10 @@ async def run_research(
                 "para obtener fuentes web recientes sobre Evolution + health down."
             ),
             "transport": "MCP you-search → api.you.com/mcp",
-            "payload": {"query": query, "user_prompt": user_prompt or ""},
+            "payload": {"query": search_query, "user_prompt": user_prompt or ""},
         },
     )
-    search_hits, search_mode = await client.search(query)
+    search_hits, search_mode = await client.search(search_query)
     if search_mode.endswith("_live") and search_hits:
         first = search_hits[0]
         sn = str(first.get("snippet") or "")
@@ -417,10 +422,9 @@ async def run_research(
     if contents_snippet:
         facts.append(f"Contents excerpt ({contents_mode}): {contents_snippet[:400]}")
 
-    hypotheses = [
-        "Blocked WhatsApp number prevents Evolution session recovery.",
-        "Restart would not fix without new pairing — high risk of false positive fix.",
-    ]
+    snap_meta = observer.metadata.get("snap") or {}
+    matrix = service_matrix_from_snapshot(snap_meta) if snap_meta else {"up": [], "down": [], "degraded": []}
+    hypotheses = hypotheses_for_run(snap_meta, matrix)
 
     return AgentStep(
         agent=AgentName.research,
@@ -443,25 +447,34 @@ async def run_research(
 
 
 def _security_rules(observer: AgentStep, research: AgentStep) -> SecurityVerdict:
-    blocked: list[str] = []
-    reasons: list[str] = []
     has_citations = len(research.citations) >= 1
     status_only = research.metadata.get("youcom_research_mode") == "skipped_status_only"
+    approved = True
+    reasons = [
+        "Read-only investigation and monitoring are approved (dry-run).",
+        "Restart, recover, delete, and production config changes remain blocked "
+        "until human operator verifies impact.",
+    ]
     if not has_citations and not status_only:
-        reasons.append("Insufficient citations for operational action.")
-    if not observer.metadata.get("dry_run", True):
-        reasons.append("Observer not in dry-run mode.")
-    approved = has_citations or status_only
-    if status_only:
-        reasons.append("Read-only status answer — no destructive action proposed.")
-    elif not approved:
-        reasons.append("Need cited research before any operational checkpoint.")
-    else:
-        reasons.append("Dry-run only — destructive actions remain blocked at gateway.")
+        approved = False
+        reasons = [
+            "Need cited web research before operational recommendations.",
+        ]
     return SecurityVerdict(
         approved=approved,
-        blocked_actions=["production_restart", "whatsapp_recover", "delete_instance"],
+        blocked_actions=["restart", "recover", "delete", "production_config_change"],
         reasons=reasons,
+    )
+
+
+def _parasail_suggests_destructive(parsed: dict) -> bool:
+    blob = " ".join(
+        str(x).lower()
+        for x in (parsed.get("reasons") or []) + (parsed.get("blocked_actions") or [])
+    )
+    return any(
+        w in blob
+        for w in ("restart", "recover", "delete", "production change", "config change")
     )
 
 
@@ -520,19 +533,29 @@ async def run_security_reviewer(
                 + "\nReturn JSON: approved (bool), blocked_actions (array), reasons (array)."
             )
             system = (
-                "You are Security Reviewer in a LiveOps multi-agent system. "
-                "Reject restart/recover/delete without strong cited evidence. "
-                "Production is dry-run only. Output JSON only."
+                "You are Security Reviewer in a LiveOps multi-agent system (dry-run only). "
+                "Approve read-only investigation (logs, metrics, categorization, tracing). "
+                "Set approved=false ONLY if the recommendation includes restart, recover, delete, "
+                "or production config changes. Do NOT reject read-only investigation because of "
+                "error backlogs or degraded signals alone — those are watch items, not proof of outage. "
+                "Output JSON only: approved, blocked_actions, reasons."
             )
             try:
                 text, llm_mode = await llm.chat(system, user, max_tokens=500)
                 parsed = ParasailClient.parse_json_block(text)
                 if "approved" in parsed:
-                    verdict = SecurityVerdict(
+                    llm_verdict = SecurityVerdict(
                         approved=bool(parsed.get("approved")),
                         blocked_actions=list(parsed.get("blocked_actions") or []),
                         reasons=list(parsed.get("reasons") or ["Parasail review"]),
                     )
+                    if _parasail_suggests_destructive(parsed) and llm_verdict.approved is False:
+                        verdict = llm_verdict
+                    else:
+                        verdict.approved = True
+                        for r in llm_verdict.reasons[:2]:
+                            if r and r not in verdict.reasons:
+                                verdict.reasons.append(f"Watch (not blocking read-only): {r[:200]}")
             except Exception:
                 llm_mode = "rules_fallback"
         await _flow(
@@ -590,22 +613,18 @@ async def run_arbitrator(
 ) -> AgentStep:
     started = _now()
     security = SecurityVerdict.model_validate(reviewer.metadata["security"])
-    confidence = 0.72 if research.citations else 0.45
-    if security.approved:
-        confidence = min(0.9, confidence + 0.1)
-
-    recommendation = (
-        "Keep Evolution API in monitored dry-run; document blocked line; "
-        "do NOT restart or recover until human operator approves."
-    )
     snap_meta = observer.metadata.get("snap") or {}
-    node = snap_meta.get("node_label") or ".5"
-    if snap_meta.get("health") == "down" or snap_meta.get("system_state") == "active":
-        recommendation = (
-            f"Keep Evolution API on node {node} in monitored dry-run; document blocked line; "
-            "do NOT restart or recover until human operator returns from travel."
-        )
-    risk_level = "medium"
+    matrix = service_matrix_from_snapshot(snap_meta) if snap_meta else {
+        "up": [],
+        "down": [],
+        "degraded": [],
+    }
+    cites_preview = canonical_citations(research.citations[:12])
+    recommendation = rules_fallback_recommendation(snap_meta, cites_preview, security)
+    confidence = 0.72 if cites_preview else 0.45
+    if security.approved:
+        confidence = min(0.9, confidence + 0.08)
+    risk_level = "low" if not matrix["down"] else "medium"
     llm_mode = "rules"
     llm = ParasailClient(settings)
     status_only = research.status == "skipped"
@@ -659,40 +678,45 @@ async def run_arbitrator(
         )
         if llm.configured():
             snap = observer.metadata.get("snap") or {}
-            src = snap.get("source") or observer.metadata.get("source") or ""
-            if src in ("ralfia_health_readonly", "ralfia_bridge_live"):
-                full_snap = {**INCIDENT_FIXTURE, **snap}
-            else:
-                full_snap = snap
+            full_snap = dict(snap)
             status_block = format_service_status_block(full_snap)
+            cite_lines = [
+                f"[{i}] {c.title} — {c.url}"
+                for i, c in enumerate(cites_preview[:6], start=1)
+            ]
             user = (
+                f"Operator question context: {observer.metadata.get('user_prompt') or ''}\n"
                 f"Live status:\n{status_block}\n\n"
-                f"Observer facts: {observer.facts}\nResearch facts: {research.facts[:6]}\n"
-                f"Citations: {[c.url for c in research.citations[:5]]}\n"
-                f"Security approved={security.approved}, reasons={security.reasons}\n"
-                "Write a clear English operator paragraph: what is down, what is up, "
-                "what to do next (dry-run only). Then JSON keys: recommended_action, "
-                "confidence (0-1), risk_level, requires_approval=true, dry_run=true."
+                f"Observer facts:\n"
+                + "\n".join(f"- {f}" for f in (observer.metadata.get("observed_facts") or observer.facts)[:8])
+                + "\n\nWrite a structured English answer with sections: "
+                "What is healthy, What needs investigation, Recommended read-only next steps "
+                "(each step with [n] citation index when applicable), Security review. "
+                "Do NOT mention blocked WhatsApp lines unless health=down in snapshot. "
+                "Do NOT claim capacity exhaustion from error counts alone.\n"
+                f"Citations:\n" + "\n".join(cite_lines)
+                + f"\nSecurity approved={security.approved}\n"
+                "Return JSON: recommended_action (full markdown text), confidence, risk_level."
             )
             system = (
-                "You are Arbitrator agent. Merge You.com research + security review. "
-                "Never recommend production restart without human approval."
+                "You are Arbitrator for read-only LiveOps. Never recommend restart/recover/delete. "
+                "Use only live snapshot facts; separate facts from hypotheses."
             )
             try:
-                text, llm_mode = await llm.chat(system, user, max_tokens=600)
+                text, llm_mode = await llm.chat(system, user, max_tokens=700)
                 parsed = ParasailClient.parse_json_block(text)
                 if parsed.get("recommended_action"):
                     recommendation = str(parsed["recommended_action"])
+                    if "blocked line" in recommendation.lower() and snap.get("health") != "down":
+                        recommendation = rules_fallback_recommendation(
+                            snap_meta, cites_preview, security
+                        )
                 if parsed.get("confidence") is not None:
                     confidence = float(parsed["confidence"])
                 if parsed.get("risk_level"):
                     risk_level = str(parsed["risk_level"])
             except Exception:
                 llm_mode = "rules_fallback"
-        recommendation = merge_recommendation_with_snapshot(
-            observer.metadata.get("snap") or {},
-            recommendation,
-        )
         if not security.approved:
             recommendation = (
                 "Security review did NOT approve proposed remediation.\n"
@@ -723,8 +747,11 @@ async def run_arbitrator(
         started_at=started,
         finished_at=_now(),
         summary=recommendation,
-        facts=observer.metadata.get("observed_facts") or observer.facts[:3],
-        hypotheses=research.hypotheses[:2],
+        facts=observer.metadata.get("observed_facts") or observer.facts[:5],
+        hypotheses=hypotheses_for_run(
+            observer.metadata.get("snap") or {},
+            service_matrix_from_snapshot(observer.metadata.get("snap") or {}),
+        ),
         citations=cites,
         metadata={
             "confidence": confidence,

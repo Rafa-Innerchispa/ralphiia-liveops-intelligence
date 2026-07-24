@@ -13,6 +13,7 @@ DEMO_SCENARIO_LINE = (
 )
 
 MAX_YOUCOM_QUERY_CHARS = 900
+MAX_YOUCOM_SEARCH_CHARS = 380
 
 
 def sanitize_operator_prompt(raw: str | None) -> str:
@@ -75,6 +76,17 @@ def facts_for_research_prompt(observed: list[str], demo: list[str]) -> str:
     if demo:
         parts.append("(Demo context only, not live observed: " + demo[0].replace("DEMO_CONTEXT: ", "") + ")")
     return " ".join(parts)[:500]
+
+
+def build_sanitized_search_query(user_prompt: str, observed: list[str], demo: list[str]) -> str:
+    """Short query for you-search (avoids MCP 422 on oversized prompts)."""
+    prompt = sanitize_operator_prompt(user_prompt)
+    if not prompt:
+        prompt = "RalfIA infrastructure MCP error backlog monitoring read-only"
+    watch = next((f for f in observed if "DEGRADED:" in f or "UNHEALTHY:" in f), "")
+    watch_short = watch.replace("DEGRADED:", "").replace("UNHEALTHY:", "").strip()[:120]
+    q = f"{prompt[:200]} {watch_short} MCP monitoring best practices".strip()
+    return q[:MAX_YOUCOM_SEARCH_CHARS]
 
 
 def build_sanitized_research_query(user_prompt: str, observed: list[str], demo: list[str]) -> str:

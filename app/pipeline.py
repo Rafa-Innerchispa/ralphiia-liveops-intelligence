@@ -18,7 +18,9 @@ from app.agents import (
     run_research,
     run_security_reviewer,
 )
+from app.ops_brief import service_matrix_from_snapshot
 from app.config import Settings
+from app.incident_run import derive_incident_id, hypotheses_for_run
 from app.provenance import canonical_citations
 from app.models import AgentName, AgentStep, Citation, FinalRecommendation, PipelineResult, SecurityVerdict
 
@@ -253,15 +255,16 @@ def _live_nodes_from_observer(observer: AgentStep) -> dict:
     kind = "live" if src in ("ralfia_health_readonly", "ralfia_bridge_live") else (
         "unavailable" if src == "live_unavailable" else "fixture"
     )
-    health = snap.get("health") or "down"
-    system_state = snap.get("system_state") or "active"
+    node = snap.get("node_label") or "?"
+    service = snap.get("service") or "Evolution API"
+    health = snap.get("health") or "unknown"
+    system_state = snap.get("system_state") or "unknown"
     return {
-        "node_amd_5": {
-            "label": "AMD node (.5) · Evolution API",
+        "primary_service": {
+            "label": f"{service} node {node}",
             "system_state": system_state,
             "health": health,
             "source": kind,
-            "note": "From live probe or bridge; fixture only when explicitly labeled.",
         },
         "ralfia_gateway": {
             "label": "RalfIA gateway / bridge",
@@ -285,11 +288,14 @@ def _assemble_result(
     reviewer = _step_by_name(steps, AgentName.security_reviewer)
     arbitrator = _step_by_name(steps, AgentName.arbitrator)
     security = SecurityVerdict.model_validate(reviewer.metadata["security"])
+    snap = observer.metadata.get("snap") or {}
+    matrix = service_matrix_from_snapshot(snap)
+    incident_id = observer.metadata.get("incident_id") or derive_incident_id(snap, matrix)
     local_hyps = local.hypotheses if local.status == "completed" else []
     cites = canonical_citations(research.citations if research.status != "skipped" else [])
     recommendation = FinalRecommendation(
         observed_facts=observer.metadata.get("observed_facts") or observer.facts,
-        hypotheses=list(dict.fromkeys(local_hyps + observer.hypotheses + research.hypotheses)),
+        hypotheses=list(dict.fromkeys(local_hyps + research.hypotheses)),
         confidence=float(arbitrator.metadata.get("confidence", 0.5)),
         citations=cites,
         recommended_action=arbitrator.metadata["recommended_action"],
@@ -305,7 +311,11 @@ def _assemble_result(
         "source_freshness": "month_filter_search"
         if youcom_mode != "skipped_status_only"
         else "ralfia_live_status",
-        "unsafe_action_rejection": not security.approved,
+        "unsafe_action_rejection": not security.approved
+        and any(
+            w in (arbitrator.metadata.get("recommended_action") or "").lower()
+            for w in ("restart", "recover", "delete")
+        ),
         "time_to_recommendation_sec": round(elapsed, 3),
         "local_analyst_latency_ms": local_latency,
         "agreement_conflict_resolution": "arbitrator_unanimous_with_reviewer"
@@ -338,7 +348,7 @@ def _assemble_result(
     return PipelineResult(
         correlation_id=cid,
         session_id=session_id,
-        incident_id="evolution-amd-health-down",
+        incident_id=incident_id,
         mode=_resolve_mode(settings),
         youcom_mode=youcom_mode,
         user_prompt=user_prompt,
@@ -416,7 +426,7 @@ async def stream_pipeline(
         {
             "correlation_id": cid,
             "session_id": session_id,
-            "incident_id": "evolution-amd-health-down",
+            "incident_id": "pending",
             "track": HACKATHON_TRACK,
             "event": HACKATHON_EVENT,
             "story": STORY,
@@ -451,6 +461,11 @@ async def stream_pipeline(
                 "user_prompt": effective,
                 "web_research": web,
                 "run_mode": run_mode,
+                "incident_id": observer.metadata.get("incident_id")
+                or derive_incident_id(
+                    observer.metadata.get("snap") or {},
+                    service_matrix_from_snapshot(observer.metadata.get("snap") or {}),
+                ),
             },
         )
 

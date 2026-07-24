@@ -53,6 +53,12 @@ def main() -> int:
                 failures.append(f"citation mismatch metrics={cc} rec={rc}")
             if cc is not None and cc < 1:
                 failures.append(f"citation_coverage={cc} (expected >=1 when research live)")
+            action = (rec.get("recommended_action") or "").lower()
+            if "blocked line" in action and "health=up" not in str(rec):
+                failures.append("stale blocked-line narrative in recommendation")
+            iid = result.get("incident_id") or ""
+            if iid == "evolution-amd-health-down":
+                failures.append("static incident id still evolution-amd-health-down")
         if ev == "agent_done":
             step = d.get("step") or {}
             steps[step.get("agent")] = step.get("status")

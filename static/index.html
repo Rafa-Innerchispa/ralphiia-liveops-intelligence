@@ -312,7 +312,7 @@
     })();
   </script>
   <script src="" id="liveopsI18nScript"></script>
-  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=13';</script>
+  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=14';</script>
 </head>
 <body>
   <div class="wrap">
@@ -368,7 +368,7 @@
       <h2 data-i18n="incidentTitle"></h2>
       <p id="scenarioText" data-i18n="scenarioText"></p>
       <div class="meta">
-        <span>ID: <code>evolution-amd-health-down</code></span>
+        <span>ID: <code id="incidentIdLabel">—</code></span>
         <span>Correlación: <code>youcom-hackathon-liveops-20260724</code></span>
         <span id="elapsedMeta"></span>
       </div>
@@ -600,7 +600,15 @@
       if (!el) return;
       el.classList.remove('active');
       el.classList.add('done');
-      el.querySelector('.state').textContent = t('stateDone');
+      el.querySelector('.state').textContent = 'Completed';
+    }
+
+    function markHumanAwaiting() {
+      const el = pipelineRail.querySelector('[data-agent="human"]');
+      if (!el) return;
+      el.classList.remove('active', 'done', 'fail');
+      el.classList.add('skip');
+      el.querySelector('.state').textContent = 'Awaiting approval';
     }
 
     function markRailFromStep(step) {
@@ -611,7 +619,11 @@
       const st = step.status || 'completed';
       if (st === 'skipped' || st === 'failed') {
         el.classList.add(st === 'failed' ? 'fail' : 'skip');
-        stateEl.textContent = st === 'failed' ? 'Unavailable' : 'Skipped';
+        if (step.agent === 'local_analyst' && st === 'skipped') {
+          stateEl.textContent = 'Unavailable';
+        } else {
+          stateEl.textContent = st === 'failed' ? 'Unavailable' : 'Skipped';
+        }
         return;
       }
       if (st === 'partial') {
@@ -624,7 +636,8 @@
         stateEl.textContent = 'Rejected';
         return;
       }
-      markRailDone(step.agent);
+      el.classList.add('done');
+      stateEl.textContent = 'Completed';
     }
 
     function renderStepCard(step) {
@@ -764,7 +777,8 @@
     function renderVerdict(data) {
       verdictPanel.hidden = false;
       const rec = data.recommendation;
-      document.getElementById('operatorBrief').textContent = rec.recommended_action || data.operator_summary || '';
+      document.getElementById('operatorBrief').textContent =
+        data.operator_summary || rec.recommended_action || '';
       const proof = (data.metrics || {}).api_proof || {};
       document.getElementById('operatorTechnical').textContent = [
         proof.ralfia,
@@ -779,8 +793,12 @@
       document.getElementById('decisionMsg').textContent = '';
       if (sec.approved === false) {
         document.getElementById('decisionMsg').textContent =
-          'Security review did NOT approve remediation: ' + (sec.reasons || []).join('; ');
+          'Security review did NOT approve proposed remediation: ' + (sec.reasons || []).join('; ');
         document.getElementById('decisionMsg').style.color = 'var(--warn)';
+      } else if (sec.approved === true) {
+        document.getElementById('decisionMsg').textContent =
+          'Read-only investigation approved. Restart/recover/delete remain blocked.';
+        document.getElementById('decisionMsg').style.color = 'var(--ok)';
       }
       document.getElementById('finalJson').textContent = JSON.stringify({
         recommendation: rec,
@@ -883,6 +901,9 @@
         appendTraceFromFlow(data);
         setProgress(Math.min(95, 10 + streamStepCount * 12));
       } else if (event === 'plan') {
+        if (data.incident_id) {
+          document.getElementById('incidentIdLabel').textContent = data.incident_id;
+        }
         appendTraceLine(
           'PLAN web_research=' + (data.web_research ? 'YES' : 'NO') +
             ' · mode=' + (data.run_mode || 'auto') +
@@ -941,6 +962,9 @@
         }
       } else if (event === 'complete') {
         renderVerdict(data.result);
+        if (data.result && data.result.incident_id) {
+          document.getElementById('incidentIdLabel').textContent = data.result.incident_id;
+        }
         const proof = (data.result.metrics || {}).api_proof || {};
         appendTraceLine(
           'DONE · ' +
@@ -949,7 +973,7 @@
               .join(' | '),
           't-res'
         );
-        markRailDone('human');
+        markHumanAwaiting();
         setProgress(100);
         streamFinished = true;
         btnGitHubIncident.disabled = false;

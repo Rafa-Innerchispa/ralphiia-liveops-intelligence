@@ -44,6 +44,11 @@ async def test_analyze_status_only_skips_youcom():
     data = resp.json()
     assert data["youcom_mode"] == "skipped_status_only"
     assert data["metrics"]["web_research_ran"] is False
+    action = data["recommendation"]["recommended_action"]
+    assert "Unhealthy / blocking:" in action
+    assert "Evolution API" in action
+    unhealthy_facts = [f for f in data["recommendation"]["observed_facts"] if f.startswith("UNHEALTHY:")]
+    assert unhealthy_facts
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,13 @@ from datetime import datetime, timezone
 
 from app.models import AgentName, AgentStep, Citation, SecurityVerdict
 from app.prompt_routing import build_research_query
-from app.ralfia_client import fetch_live_status
+from app.ralfia_client import fetch_live_status, INCIDENT_FIXTURE
+from app.ops_brief import (
+    build_status_only_recommendation,
+    format_service_status_block,
+    merge_recommendation_with_snapshot,
+    service_matrix_from_snapshot,
+)
 from app.youcom_client import YouComClient
 from app.config import Settings
 from app.local_analyst import resolve_local_analyst_model, run_local_inference
@@ -35,31 +41,46 @@ async def run_observer(settings: Settings, emit: DataEmitter = None) -> AgentSte
                 "El agente Observer no toca producción: hace GET al health de RalfIA "
                 "(:8101/status) y carga el snapshot del nodo AMD (.5)."
             ),
-            "transport": "HTTP GET → 127.0.0.1:8101/status",
+            "transport": f"HTTP GET → {settings.ralfia_status_endpoint()}",
         },
     )
     snap = await fetch_live_status(settings)
+    matrix = service_matrix_from_snapshot(snap)
     await _flow(
         emit,
         {
             "agent": "observer",
             "kind": "response",
-            "title": "Snapshot recibido",
+            "title": "Live snapshot received",
             "explain": (
-                f"Fuente: {snap.get('source')}. "
-                f"Evolution en {snap.get('node_label')}: systemd={snap.get('system_state')}, "
-                f"health={snap.get('health')}."
+                f"Source: {snap.get('source_label')}. "
+                f"{snap.get('service')} node {snap.get('node_label')}: "
+                f"systemd={snap.get('system_state')}, health={snap.get('health')}."
             ),
-            "payload": snap,
+            "payload": {
+                "source": snap.get("source"),
+                "health": snap.get("health"),
+                "system_state": snap.get("system_state"),
+                "services_down": matrix["down"],
+                "services_degraded": matrix["degraded"],
+            },
         },
     )
     source_label = snap.get("source_label") or snap.get("source", "unknown")
     facts = [
         f"Data source: {source_label}.",
-        f"Node {snap['node_label']} reachable (read-only probe).",
-        f"{snap['service']}: system_state={snap['system_state']}, health={snap['health']}.",
-        snap["summary"],
+        f"Checked at: {snap.get('checked_at', 'now')}.",
     ]
+    for line in matrix["down"]:
+        facts.append(f"UNHEALTHY: {line}")
+    for line in matrix["degraded"]:
+        facts.append(f"DEGRADED: {line}")
+    for line in matrix["up"]:
+        facts.append(f"HEALTHY: {line}")
+    if not matrix["down"] and not matrix["degraded"]:
+        facts.append(snap["summary"])
+    else:
+        facts.append(f"Incident context: {snap['summary']}")
     ralfia = snap.get("ralfia_status") or {}
     if ralfia:
         if ralfia.get("mongodb_ok") is not None:
@@ -89,6 +110,17 @@ async def run_observer(settings: Settings, emit: DataEmitter = None) -> AgentSte
             "evidence_ref": snap.get("evidence_ref"),
             "source": snap.get("source"),
             "dry_run": True,
+            "snap": {
+                "node_label": snap.get("node_label"),
+                "service": snap.get("service"),
+                "system_state": snap.get("system_state"),
+                "health": snap.get("health"),
+                "source": snap.get("source"),
+                "source_label": source_label,
+                "summary": snap.get("summary"),
+                "ralfia_status": snap.get("ralfia_status"),
+                "checked_at": snap.get("checked_at"),
+            },
         },
     )
 
@@ -537,11 +569,29 @@ async def run_arbitrator(
     status_only = research.status == "skipped"
     if status_only:
         confidence = 0.82
-        recommendation = (
-            "Based on live RalfIA read-only probe only (You.com not invoked): "
-            + " ".join(observer.facts[:2])
-            + " Continue dry-run monitoring; no production changes."
-        )
+        snap = observer.metadata.get("snap") or {}
+        if snap:
+            full_snap = {**INCIDENT_FIXTURE, **snap}
+            full_snap["source_label"] = (
+                snap.get("source_label")
+                or observer.metadata.get("source")
+                or "Live · RalfIA :8101"
+            )
+            recommendation = build_status_only_recommendation(full_snap, observer.facts)
+        else:
+            recommendation = build_status_only_recommendation(
+                {
+                    "node_label": ".5",
+                    "service": "Evolution API",
+                    "system_state": "active",
+                    "health": "down",
+                    "source_label": "Live probe",
+                    "summary": observer.facts[0] if observer.facts else "",
+                    "ralfia_status": {},
+                    "source": observer.metadata.get("source"),
+                },
+                observer.facts,
+            )
         llm_mode = "skipped_no_web_research"
         await _flow(
             emit,
@@ -566,11 +616,16 @@ async def run_arbitrator(
             },
         )
         if llm.configured():
+            full_snap = {**INCIDENT_FIXTURE, **(observer.metadata.get("snap") or {})}
+            status_block = format_service_status_block(full_snap)
             user = (
-                f"Observer: {observer.facts}\nResearch: {research.facts[:4]}\n"
+                f"Live status:\n{status_block}\n\n"
+                f"Observer facts: {observer.facts}\nResearch facts: {research.facts[:6]}\n"
+                f"Citations: {[c.url for c in research.citations[:5]]}\n"
                 f"Security approved={security.approved}, reasons={security.reasons}\n"
-                "Synthesize final JSON: recommended_action, confidence (0-1), risk_level, "
-                "requires_approval=true, dry_run=true."
+                "Write a clear English operator paragraph: what is down, what is up, "
+                "what to do next (dry-run only). Then JSON keys: recommended_action, "
+                "confidence (0-1), risk_level, requires_approval=true, dry_run=true."
             )
             system = (
                 "You are Arbitrator agent. Merge You.com research + security review. "
@@ -587,6 +642,10 @@ async def run_arbitrator(
                     risk_level = str(parsed["risk_level"])
             except Exception:
                 llm_mode = "rules_fallback"
+        recommendation = merge_recommendation_with_snapshot(
+            {**INCIDENT_FIXTURE, **(observer.metadata.get("snap") or {})},
+            recommendation,
+        )
         await _flow(
             emit,
             {

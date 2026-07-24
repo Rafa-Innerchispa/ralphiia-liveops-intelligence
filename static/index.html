@@ -308,7 +308,7 @@
     })();
   </script>
   <script src="" id="liveopsI18nScript"></script>
-  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=5';</script>
+  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=9';</script>
 </head>
 <body>
   <div class="wrap">
@@ -341,10 +341,11 @@
         <div class="chips" id="promptChips"></div>
       </div>
       <div class="cta-row" aria-label="Demo flow">
-        <button type="button" class="primary" id="btnLiveStatus" data-i18n="ctaLiveStatus"></button>
-        <button type="button" class="secondary" id="btnInvestigate" data-i18n="ctaInvestigate"></button>
-        <button type="button" class="ghost-cta" id="btnGitHubIncident" data-i18n="ctaGitHub" disabled></button>
+        <button type="button" class="primary" id="btnLiveStatus" data-i18n="ctaLiveStatus">1 · Check Live Status</button>
+        <button type="button" class="secondary" id="btnInvestigate" data-i18n="ctaInvestigate">2 · Investigate with Live Sources</button>
+        <button type="button" class="ghost-cta" id="btnGitHubIncident" data-i18n="ctaGitHub" disabled title="">3 · Create GitHub Incident</button>
       </div>
+      <p class="cta-help" id="ctaHelp" data-i18n="ctaHelp" style="margin:.45rem 0 0;font-size:.78rem;color:var(--muted);line-height:1.4">Demo order: (1) live status → (2) web + Parasail → (3) GitHub after a run completes.</p>
       <div class="chat-log" id="chatLog"></div>
     </section>
 
@@ -369,7 +370,9 @@
       </div>
     </section>
 
-    <section class="story" id="storySection">
+    <details class="story-ref" style="margin-bottom:1rem;background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:.5rem .85rem">
+      <summary style="cursor:pointer;font-size:.78rem;color:var(--muted);font-weight:600" data-i18n="storyRefTitle">Architecture reference (static — not your live answer)</summary>
+      <div class="story" id="storySection" style="margin-top:.65rem">
       <div class="box">
         <h2 style="margin:0 0 .5rem;font-size:.85rem;color:var(--muted);text-transform:uppercase" data-i18n="storyProblemTitle"></h2>
         <p id="storyProblem" style="margin:0;font-size:.9rem;line-height:1.45;color:#cbd5e1">…</p>
@@ -378,7 +381,8 @@
         <h2 style="margin:0 0 .5rem;font-size:.85rem;color:var(--muted);text-transform:uppercase" data-i18n="storyStepsTitle"></h2>
         <ol id="storySteps"></ol>
       </div>
-    </section>
+      </div>
+    </details>
 
     <div class="pipeline" id="pipelineRail">
       <div class="pipe-step" data-agent="observer"><div class="name">Observer</div><div class="state">RalfIA read-only</div></div>
@@ -401,7 +405,11 @@
 
     <section class="verdict" id="verdictPanel" hidden>
       <h2 data-i18n="verdictTitle"></h2>
+      <p class="human-checkpoint-hint" data-i18n="humanCheckpointHint" style="font-size:.82rem;color:var(--warn);margin:0 0 .75rem;line-height:1.45"></p>
+      <div class="label" data-i18n="naturalAnswerLabel">Natural-language answer</div>
       <div class="operator-brief" id="operatorBrief"></div>
+      <div class="label" data-i18n="technicalTraceLabel">API trace (this run)</div>
+      <p id="operatorTechnical" style="font-size:.78rem;color:var(--muted);margin:0 0 .75rem;font-family:'JetBrains Mono',monospace"></p>
       <div class="metrics" id="metricsRow"></div>
       <div class="verdict-action" id="verdictAction"></div>
       <div class="cite-cards" id="citationCards"></div>
@@ -456,6 +464,10 @@
       const sp = document.getElementById('storyProblem');
       if (sp && !sp.dataset.fromApi) sp.textContent = t('storyProblem');
       refreshFeedHeading();
+      const gh = document.getElementById('btnGitHubIncident');
+      if (gh && gh.disabled) gh.title = t('ctaGitHubDisabled');
+      const help = document.getElementById('ctaHelp');
+      if (help && !help.textContent.trim()) help.textContent = t('ctaHelp');
     }
 
     function refreshFeedHeading() {
@@ -698,15 +710,21 @@
     }
 
     function getPrompt() {
-      const t = promptInput.value.trim();
-      return t || DEFAULT_INCIDENT;
+      return promptInput.value.trim();
     }
 
     function renderVerdict(data) {
       verdictPanel.hidden = false;
       const rec = data.recommendation;
-      document.getElementById('operatorBrief').textContent =
-        data.operator_summary || rec.recommended_action;
+      document.getElementById('operatorBrief').textContent = rec.recommended_action || data.operator_summary || '';
+      const proof = (data.metrics || {}).api_proof || {};
+      document.getElementById('operatorTechnical').textContent = [
+        proof.ralfia,
+        proof.ollama,
+        proof.youcom,
+        proof.parasail_security ? 'Security:' + proof.parasail_security : '',
+        proof.parasail_arbitrator ? 'Arbitrator:' + proof.parasail_arbitrator : '',
+      ].filter(Boolean).join(' · ') || data.youcom_mode || '';
       document.getElementById('verdictAction').textContent = rec.recommended_action;
       document.getElementById('finalJson').textContent = JSON.stringify({
         recommendation: rec,
@@ -739,7 +757,10 @@
         proof.parasail_arbitrator ? 'Arb:' + proof.parasail_arbitrator : '',
       ].filter(Boolean).join(' · ');
       renderCitationCards(rec.citations);
-      appendChat('LiveOps', data.operator_summary || rec.recommended_action, 'ops');
+      const chatAnswer = rec.recommended_action || data.operator_summary || '';
+      appendChat('LiveOps', chatAnswer, 'ops');
+      document.getElementById('decisionMsg').textContent = '';
+      document.getElementById('decisionMsg').style.color = 'var(--muted)';
     }
 
     function appendFlow(d) {
@@ -858,6 +879,7 @@
         setProgress(100);
         streamFinished = true;
         btnGitHubIncident.disabled = false;
+        btnGitHubIncident.title = '';
       }
     }
 
@@ -893,6 +915,9 @@
       }
       if (runMode === 'investigate' && !getPrompt().trim()) {
         promptInput.value = t('promptInvestigate');
+      }
+      if (runMode === 'status_only' && /investigate|web sources|current sources/i.test(getPrompt())) {
+        appendTraceLine('NOTE: Prompt asks for web sources — use button 2, not 1 (button 1 skips You.com on purpose).', 't-skip');
       }
       lastUserPrompt = getPrompt();
       appendChat('You', lastUserPrompt, 'user');

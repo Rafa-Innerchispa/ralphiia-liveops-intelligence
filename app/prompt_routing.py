@@ -114,18 +114,5 @@ def build_operator_summary(
     data_sources: dict[str, str] | None = None,
     local_preview: str = "",
 ) -> str:
-    short_rec = recommendation[:280] + ("…" if len(recommendation) > 280 else "")
-    proof = ""
-    if data_sources:
-        proof = (
-            f"APIs this run: Observer={data_sources.get('observer', '?')}; "
-            f"Local={data_sources.get('local_analyst', '?')}; "
-            f"Research={data_sources.get('research', '?')}. "
-        )
-    local_bit = ""
-    if local_preview:
-        local_bit = f" Local analyst: {local_preview[:160]}…" if len(local_preview) > 160 else f" Local analyst: {local_preview}"
-    return (
-        f"{proof}"
-        f"Answer (confidence {confidence:.0%}): {short_rec}{local_bit}"
-    )
+    """Operator-facing text; keep recommendation readable (no API dump prefix)."""
+    return recommendation

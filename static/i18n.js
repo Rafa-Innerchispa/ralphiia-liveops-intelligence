@@ -14,6 +14,9 @@
       ctaLiveStatus: "1 · Check Live Status",
       ctaInvestigate: "2 · Investigate with Live Sources",
       ctaGitHub: "3 · Create GitHub Incident",
+      ctaHelp:
+        "Demo order: (1) live status only — saves You.com credits. (2) web research + Parasail with citations. (3) opens after a run finishes — GitHub incident preview (needs ONE_SECRET or GITHUB_TOKEN on server).",
+      ctaGitHubDisabled: "Complete step 1 or 2 first",
       promptLiveStatus: "What is currently unhealthy in my infrastructure? Use live read-only evidence only.",
       promptInvestigate:
         "Evaluate my servers and give possible solutions with web-backed recommendations and citations for the problem found. Do not change production.",
@@ -57,7 +60,11 @@
       pipeSecurity: "Parasail",
       pipeArbitrator: "Recommendation",
       feedTitle: "Live data flow",
-      traceTitle: "Live API trace (real calls)",
+      storyRefTitle: "Architecture reference (static — not your live answer)",
+      humanCheckpointHint:
+        "Security “approved” in JSON means the reviewer agent allowed a dry-run recommendation — it is NOT you. Click Approve / Reject below to record your human checkpoint (still zero production changes).",
+      naturalAnswerLabel: "Natural-language answer",
+      technicalTraceLabel: "API trace (this run)",
       traceEmpty: "Send a question — each line is an outbound HTTP/MCP call or an explicit skip.",
       feedEmpty:
         "Send a question or run live analysis. You will see each request/response here (Search → Contents → Research may take ~30 s).",
@@ -107,6 +114,9 @@
       ctaLiveStatus: "1 · Comprobar estado live",
       ctaInvestigate: "2 · Investigar con fuentes live",
       ctaGitHub: "3 · Crear incidente GitHub",
+      ctaHelp:
+        "Orden demo: (1) solo estado live — ahorra créditos You.com. (2) investigación web + Parasail con citas. (3) se habilita al terminar 1 o 2 — preview de issue GitHub (requiere ONE_SECRET o GITHUB_TOKEN en servidor).",
+      ctaGitHubDisabled: "Completa el paso 1 o 2 primero",
       promptLiveStatus: "¿Qué está unhealthy en mi infraestructura? Solo evidencia read-only.",
       promptInvestigate:
         "Evalúa mis servidores y da soluciones con citas web. Sin cambiar producción.",
@@ -150,7 +160,11 @@
       pipeSecurity: "Parasail",
       pipeArbitrator: "Recomendación",
       feedTitle: "Flujo de datos en vivo",
-      traceTitle: "Traza API en vivo (llamadas reales)",
+      storyRefTitle: "Referencia de arquitectura (estática — no es tu respuesta en vivo)",
+      humanCheckpointHint:
+        "“Approved” en JSON = agente Security, no tú. Pulsa Approve / Reject abajo para tu checkpoint humano (sin cambios en producción).",
+      naturalAnswerLabel: "Respuesta en lenguaje natural",
+      technicalTraceLabel: "Traza API (esta ejecución)",
       traceEmpty: "Envía una pregunta — cada línea es una llamada HTTP/MCP real o un skip explícito.",
       feedEmpty:
         "Envía una pregunta o ejecuta análisis en vivo. Verás cada request/response aquí (Search → Contents → Research puede tardar ~30 s).",

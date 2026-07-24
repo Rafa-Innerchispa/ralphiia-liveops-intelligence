@@ -21,4 +21,4 @@ services:
         value: mcp
       # Set in Render Dashboard (never commit values):
       # YOUCOM_API_KEY, PARASAIL_API_KEY, ONE_SECRET, GITHUB_TOKEN,
-      # GITHUB_REPO_OWNER, GITHUB_REPO_NAME, RALFIA_STATUS_URL (bridge to home lab)
+      # RALFIA_STATUS_URL, RALFIA_STATUS_TOKEN, CF_ACCESS_* (read-only bridge)

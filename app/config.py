@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     liveops_whatsapp_number: str = ""
     ralfia_openai_root: str = "/home/rlopez/projects/raphiia-openai"
     ralfia_status_url: str = ""
+    ralfia_status_token: str = ""
     github_repo_owner: str = "Rafa-Innerchispa"
     github_repo_name: str = "ralphiia-liveops-intelligence"
     github_token: str = ""
@@ -43,6 +44,20 @@ class Settings(BaseSettings):
             os.getenv("RALFIA_STATUS_URL", "").strip()
             or self.ralfia_status_url.strip()
             or "http://127.0.0.1:8101/status"
+        )
+
+    def resolved_ralfia_status_token(self) -> str:
+        return (
+            os.getenv("RALFIA_STATUS_TOKEN", "").strip()
+            or os.getenv("LIVEOPS_BRIDGE_TOKEN", "").strip()
+            or self.ralfia_status_token.strip()
+        )
+
+    def resolved_data_mode(self) -> str:
+        return (
+            os.getenv("LIVEOPS_DATA_MODE", "").strip().lower()
+            or self.data_mode.strip().lower()
+            or "auto"
         )
 
     def deployment_info(self) -> dict:

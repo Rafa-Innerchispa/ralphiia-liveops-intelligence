@@ -1,0 +1,15 @@
+[Unit]
+Description=RalfIA LiveOps read-only bridge (:8790)
+After=network-online.target ralfia-app.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/rlopez/projects/ralphiia-liveops-intelligence
+EnvironmentFile=-/home/rlopez/projects/ralphiia-liveops-intelligence/.env
+ExecStart=/home/rlopez/projects/ralphiia-liveops-intelligence/venv/bin/uvicorn bridge_app.main:app --host 127.0.0.1 --port 8790
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

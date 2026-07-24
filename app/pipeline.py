@@ -28,43 +28,43 @@ STORY = {
     "track": HACKATHON_TRACK,
     "event": HACKATHON_EVENT,
     "problem": (
-        "En producción real, el nodo AMD (.5) tiene Evolution API con systemd activo "
-        "pero health=down por línea WhatsApp bloqueada."
+        "In production, AMD node (.5) runs Evolution API with systemd active "
+        "but health=down due to a blocked WhatsApp line (real incident, dry-run demo)."
     ),
     "why_multi_agent": (
-        "Un solo LLM diría «reinicia el servicio» sin citas. Aquí cada agente tiene un rol "
-        "y los datos pasan en cadena: observación → analista local OSS → web citada (You.com) "
-        "→ seguridad → veredicto → humano."
+        "A single LLM would say “restart the service” without citations. "
+        "Each agent has a role: observation → local OSS analyst → cited web (You.com) "
+        "→ security → verdict → human checkpoint."
     ),
     "steps": [
         {
             "agent": "observer",
-            "input": "Health RalfIA :8101 + snapshot incidente .5",
-            "output": "Hechos estructurados (system_state, health, summary)",
-            "api": "GET http://127.0.0.1:8101/status",
+            "input": "RalfIA :8101 health + incident snapshot (.5)",
+            "output": "Structured facts (system_state, health, summary)",
+            "api": "GET :8101/status (read-only)",
         },
         {
             "agent": "local_analyst",
-            "input": "Hechos del observer + pregunta del operador",
-            "output": "Hipótesis privadas (Ollama, si responde)",
+            "input": "Observer facts + operator question",
+            "output": "Private hypotheses (Ollama)",
             "api": "Ollama /api/chat (local OSS)",
         },
         {
             "agent": "research",
-            "input": "Hechos + consulta You.com",
-            "output": "URLs, informe you-research, citas",
+            "input": "Facts + You.com query (step 2 only)",
+            "output": "URLs, you-research report, citations",
             "api": "You.com MCP: you-search · you-contents · you-research",
         },
         {
             "agent": "security_reviewer",
-            "input": "Hechos + informe + citas",
-            "output": "approved/blocked + razones",
+            "input": "Facts + report + citations",
+            "output": "approved/blocked + reasons",
             "api": "Parasail chat/completions",
         },
         {
             "agent": "arbitrator",
-            "input": "Todo lo anterior",
-            "output": "recommended_action + confidence (humano Approve dry-run)",
+            "input": "All of the above",
+            "output": "recommended_action + confidence",
             "api": "Parasail chat/completions",
         },
     ],
@@ -89,9 +89,16 @@ def _data_sources(steps: list[AgentStep]) -> dict[str, str]:
     observer = _step_by_name(steps, AgentName.observer)
     research = _step_by_name(steps, AgentName.research)
     obs_src = observer.metadata.get("source", "unknown")
-    obs_label = "Live · RalfIA :8101" if obs_src == "ralfia_health_readonly" else (
-        "Fallback fixture" if "fixture" in str(obs_src) else str(obs_src)
-    )
+    if obs_src == "ralfia_health_readonly":
+        obs_label = "Live · RalfIA :8101"
+    elif obs_src == "ralfia_bridge_live":
+        obs_label = "Live · RalfIA bridge"
+    elif obs_src == "live_unavailable":
+        obs_label = "Unavailable · live probe failed"
+    elif "fixture" in str(obs_src):
+        obs_label = "Fallback fixture"
+    else:
+        obs_label = str(obs_src)
     res_mode = research.metadata.get("youcom_research_mode", "unknown")
     if res_mode == "skipped_status_only":
         res_label = "Skipped (status-only prompt)"
@@ -241,18 +248,23 @@ def _models_used(settings: Settings, steps: list[AgentStep]) -> list[dict]:
 
 def _live_nodes_from_observer(observer: AgentStep) -> dict:
     src = observer.metadata.get("source", "unknown")
-    kind = "live" if src == "ralfia_health_readonly" else "fixture"
+    snap = observer.metadata.get("snap") or {}
+    kind = "live" if src in ("ralfia_health_readonly", "ralfia_bridge_live") else (
+        "unavailable" if src == "live_unavailable" else "fixture"
+    )
+    health = snap.get("health") or "down"
+    system_state = snap.get("system_state") or "active"
     return {
         "node_amd_5": {
             "label": "AMD node (.5) · Evolution API",
-            "system_state": "active",
-            "health": "down",
+            "system_state": system_state,
+            "health": health,
             "source": kind,
-            "note": "Incident metadata from fixture; health probe from RalfIA when live.",
+            "note": "From live probe or bridge; fixture only when explicitly labeled.",
         },
         "ralfia_gateway": {
-            "label": "RalfIA gateway",
-            "probe": "GET :8101/status",
+            "label": "RalfIA gateway / bridge",
+            "probe": "GET bridge or :8101/status",
             "source": kind,
         },
     }

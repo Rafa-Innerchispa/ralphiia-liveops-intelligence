@@ -308,7 +308,7 @@
     })();
   </script>
   <script src="" id="liveopsI18nScript"></script>
-  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=9';</script>
+  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=10';</script>
 </head>
 <body>
   <div class="wrap">
@@ -453,6 +453,13 @@
       if (p.startsWith('/liveops')) return '/liveops';
       return '';
     })();
+
+    /** ngrok Free blocks API fetch unless this header is sent (browser, not curl). */
+    function loFetch(url, opts = {}) {
+      const headers = new Headers(opts.headers || {});
+      headers.set('ngrok-skip-browser-warning', '69420');
+      return fetch(url, { ...opts, headers });
+    }
 
     function t(key) {
       return (window.LiveOpsI18n && window.LiveOpsI18n.t(key)) || key;
@@ -634,7 +641,7 @@
 
     async function loadLiveNodes() {
       try {
-        const data = await fetch(BASE + '/api/nodes').then(r => r.json());
+        const data = await loFetch(BASE + '/api/nodes').then(r => r.json());
         renderLiveNodes(data);
         const avail = (data.models_available_local || []).join(', ');
         document.getElementById('modelsAvailBlock').innerHTML =
@@ -785,7 +792,7 @@
 
     async function loadStory() {
       try {
-        const s = await fetch(BASE + '/api/story').then(r => r.json());
+        const s = await loFetch(BASE + '/api/story').then(r => r.json());
         document.getElementById('storyProblem').dataset.fromApi = '1';
         document.getElementById('storyProblem').textContent = s.problem + ' ' + (s.why_multi_agent || '');
         const ol = document.getElementById('storySteps');
@@ -798,7 +805,7 @@
 
     async function loadBuildReview() {
       try {
-        const d = await fetch(BASE + '/api/build-review').then(r => r.json());
+        const d = await loFetch(BASE + '/api/build-review').then(r => r.json());
         const verdict = d.verdict || d.status || '—';
         document.getElementById('buildReviewBody').innerHTML =
           `<strong>${esc(d.tool || 'Opsera Agents')}</strong> — ${esc(d.scope || d.summary || '')}` +
@@ -808,7 +815,7 @@
 
     async function loadHealth() {
       try {
-        const h = await fetch(BASE + '/health').then(r => r.json());
+        const h = await loFetch(BASE + '/health').then(r => r.json());
         document.getElementById('trackBadge').textContent = 'Track: ' + (h.hackathon_track || 'Multi-Agent Systems');
         const yb = document.getElementById('youcomBadge');
         yb.textContent = 'You.com: ' + (h.youcom.configured ? h.youcom.mode : 'fixture');
@@ -941,8 +948,11 @@
         el.querySelector('.state').textContent = pipeNames[el.dataset.agent] || '';
       });
 
+      appendTraceLine('START · run_mode=' + (runMode || 'auto'), 't-req');
+      setProgress(8);
+
       try {
-        const resp = await fetch(BASE + '/api/analyze/stream', {
+        const resp = await loFetch(BASE + '/api/analyze/stream', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -983,7 +993,7 @@
     async function openIncidentPreview() {
       document.getElementById('issueCreateMsg').textContent = '';
       try {
-        const r = await fetch(BASE + '/api/incident/preview', {
+        const r = await loFetch(BASE + '/api/incident/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: sessionId }),
@@ -1005,7 +1015,7 @@
       msg.style.color = 'var(--muted)';
       msg.textContent = t('stateRunning');
       try {
-        const r = await fetch(BASE + '/api/incident/create', {
+        const r = await loFetch(BASE + '/api/incident/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1033,7 +1043,7 @@
       clearError();
       document.getElementById('probeBtn').disabled = true;
       try {
-        const r = await fetch(BASE + '/api/youcom/probe').then(x => x.json());
+        const r = await loFetch(BASE + '/api/youcom/probe').then(x => x.json());
         showError(t('probeOk') + ' ' + r.mode + ' · citas=' + r.citation_count + ' · ' + (r.research_preview || '').slice(0, 120));
         errorBanner.style.background = 'rgba(52, 211, 153, .12)';
         errorBanner.style.borderColor = 'rgba(52, 211, 153, .35)';
@@ -1046,10 +1056,10 @@
 
     async function decide(decision) {
       if (decision === 'research_deeper') {
-        runStream(true);
+        runStream('investigate', true);
         return;
       }
-      const res = await fetch(BASE + '/api/decision', {
+      const res = await loFetch(BASE + '/api/decision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision, note: 'UI dry-run' })

@@ -43,6 +43,19 @@ def _require_bearer(request: Request, settings: BridgeSettings) -> None:
         raise HTTPException(status_code=403, detail="invalid bearer token")
 
 
+@app.get("/")
+async def bridge_root() -> dict:
+    return {
+        "ok": True,
+        "service": "liveops-bridge",
+        "endpoints": {
+            "health": "GET /health (no auth)",
+            "status": "GET /liveops-bridge/status (Authorization: Bearer token)",
+        },
+        "note": "This host is read-only telemetry for Render, not the LiveOps UI.",
+    }
+
+
 @app.get("/health")
 async def health(settings: BridgeSettings = Depends(get_bridge_settings)) -> dict:
     return {

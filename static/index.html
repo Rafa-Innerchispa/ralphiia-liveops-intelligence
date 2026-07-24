@@ -308,7 +308,7 @@
     })();
   </script>
   <script src="" id="liveopsI18nScript"></script>
-  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=10';</script>
+  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=11';</script>
 </head>
 <body>
   <div class="wrap">
@@ -755,7 +755,6 @@
       }
       document.getElementById('elapsedMeta').textContent =
         `${t('lastRun')} ${m.time_to_recommendation_sec}s · ${t('youcomMode')} ${data.youcom_mode}`;
-      const proof = m.api_proof || {};
       runProof.textContent = [
         proof.ralfia,
         proof.ollama,

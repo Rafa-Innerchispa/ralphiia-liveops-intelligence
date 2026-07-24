@@ -57,8 +57,14 @@ STATUS_HINTS = (
 
 
 def normalize_prompt(raw: str | None) -> str:
-    text = (raw or "").strip()
-    return text if text else DEFAULT_INCIDENT_QUESTION
+    from app.provenance import sanitize_operator_prompt
+
+    text = sanitize_operator_prompt(raw)
+    if text:
+        return text
+    if raw and str(raw).strip() in {"promptLiveStatus", "promptInvestigate"}:
+        return ""
+    return (raw or "").strip() or DEFAULT_INCIDENT_QUESTION
 
 
 def needs_web_research(
@@ -87,23 +93,31 @@ STATUS_DEFAULT_PROMPT = (
 
 
 def prompt_for_run_mode(run_mode: str, user_prompt: str, observer_facts: list[str]) -> str:
+    from app.provenance import sanitize_operator_prompt
+
+    clean = sanitize_operator_prompt(user_prompt) or user_prompt.strip()
     if run_mode == "status_only":
-        return user_prompt.strip() or STATUS_DEFAULT_PROMPT
+        return clean or STATUS_DEFAULT_PROMPT
     if run_mode == "investigate":
-        ctx = " ".join(observer_facts[:5])[:500]
-        base = user_prompt.strip() or INVESTIGATE_DEFAULT_PROMPT
+        base = clean or INVESTIGATE_DEFAULT_PROMPT
+        observed = [
+            f
+            for f in observer_facts
+            if not f.startswith("DEMO_") and not f.startswith("FIXTURE")
+        ][:4]
+        ctx = " ".join(observed)[:400]
         if ctx and ctx not in base:
-            return f"{base} Observed facts from live probe: {ctx}"
+            return f"{base} Observed this run: {ctx}"
         return base
     return user_prompt
 
 
 def build_research_query(user_prompt: str, observer_facts: list[str]) -> str:
-    context = " ".join(observer_facts[:3])[:400]
-    return (
-        f"{user_prompt.strip()} Context (read-only RalfIA): {context} "
-        "Evolution API WhatsApp health systemd troubleshooting read-only"
-    ).strip()
+    from app.provenance import build_sanitized_research_query
+
+    observed = [f for f in observer_facts if not f.startswith("DEMO_")]
+    demo = [f for f in observer_facts if f.startswith("DEMO_")]
+    return build_sanitized_research_query(user_prompt, observed, demo)
 
 
 def build_operator_summary(

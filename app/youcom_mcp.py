@@ -83,14 +83,18 @@ class YouComMcpClient:
         )
         text = self._text_blocks(result)
         hits = _parse_search_text(text)[:count]
-        if not hits and text:
-            hits = [
-                {
-                    "title": "You.com MCP search",
-                    "url": "https://you.com/docs/welcome",
-                    "snippet": text[:500],
-                }
-            ]
+        if "Error code: 422" in text or "Failed to perform search" in text:
+            return [], "mcp_search_error"
+        hits = [
+            h
+            for h in hits
+            if h.get("url")
+            and not str(h.get("url")).startswith("https://you.com/docs/welcome")
+            and "422" not in str(h.get("snippet") or "")
+        ]
+        if not hits and text and not text.strip().startswith("MCP error"):
+            if "Title:" in text and "URL:" in text:
+                hits = _parse_search_text(text)[:count]
         return hits, mode
 
     async def contents(self, url: str) -> tuple[str, str]:
@@ -98,7 +102,7 @@ class YouComMcpClient:
             return "[mcp_free] Contents requires API key (you-contents)", "mcp_free"
         result = await self.call_tool(
             "you-contents",
-            {"url": url, "format": "markdown"},
+            {"urls": [url], "format": "markdown"},
         )
         text = self._text_blocks(result)
         return text[:4000] or "[empty MCP contents]", "mcp_live"

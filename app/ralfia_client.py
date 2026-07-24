@@ -68,12 +68,6 @@ def _is_local_probe(url: str) -> bool:
     return "127.0.0.1" in u or "localhost" in u or "192.168." in u
 
 
-def _is_bridge_probe(url: str) -> bool:
-    if _is_local_probe(url):
-        return False
-    return "liveops-bridge" in url or url.startswith("https://")
-
-
 def _probe_headers(settings: Settings) -> dict[str, str]:
     headers: dict[str, str] = {"Accept": "application/json"}
     token = settings.resolved_ralfia_status_token()
@@ -85,6 +79,18 @@ def _probe_headers(settings: Settings) -> dict[str, str]:
         headers["CF-Access-Client-Id"] = cf_id
         headers["CF-Access-Client-Secret"] = cf_secret
     return headers
+
+
+def _validate_bridge_json(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if data.get("source") != "live_ralfia_bridge":
+        return False
+    if data.get("ok") is not True:
+        return False
+    if not data.get("verified_at"):
+        return False
+    return True
 
 
 def _map_bridge_payload(data: dict[str, Any]) -> dict[str, Any]:
@@ -103,7 +109,7 @@ def _map_bridge_payload(data: dict[str, Any]) -> dict[str, Any]:
         or f"Bridge verified Evolution node {node_label}: systemd={system_state}, health={health}."
     )
     return {
-        **INCIDENT_FIXTURE,
+        "incident_id": INCIDENT_FIXTURE["incident_id"],
         "node_label": node_label,
         "service": evolution.get("name") or "Evolution API",
         "system_state": system_state,
@@ -136,15 +142,21 @@ def _fixture_snapshot(settings: Settings, *, label: str, source: str) -> dict:
 
 def _unavailable_snapshot(settings: Settings, *, reason: str) -> dict:
     return {
-        **INCIDENT_FIXTURE,
+        "incident_id": INCIDENT_FIXTURE["incident_id"],
+        "node_label": "unknown",
+        "service": "Evolution API",
+        "system_state": "unknown",
+        "health": "unknown",
         "source": SOURCE_UNAVAILABLE,
         "source_label": "Unavailable · live probe failed",
         "summary": (
             f"Live infrastructure probe failed ({reason}). "
-            "No silent fixture — use LAN demo or configure RALFIA_STATUS_URL + token."
+            "Demo scenario may be discussed separately — not observed live this run."
         ),
+        "evidence_ref": "probe:unavailable",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "read_only_probes": RALFIA_READ_ONLY_PROBES,
+        "ralfia_status": None,
     }
 
 
@@ -173,16 +185,22 @@ async def fetch_live_status(settings: Settings) -> dict:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
+            ctype = (resp.headers.get("content-type") or "").lower()
+            if resp.status_code == 200 and "json" not in ctype and "application/" in ctype:
+                return _unavailable_snapshot(settings, reason="non-JSON response (likely HTML challenge)")
             if resp.status_code == 200:
-                data = resp.json()
-                if data.get("source") == "live_ralfia_bridge" or data.get("evolution_amd"):
-                    if data.get("ok") is False:
-                        return _unavailable_snapshot(settings, reason="bridge ok=false")
+                try:
+                    data = resp.json()
+                except ValueError:
+                    return _unavailable_snapshot(settings, reason="invalid JSON body")
+                if _validate_bridge_json(data):
                     return _map_bridge_payload(data)
                 if _is_local_probe(url) or data.get("mongodb") is not None:
                     return _map_local_payload(data)
-                if _is_bridge_probe(url):
-                    return _map_bridge_payload(data)
+                if data.get("evolution_amd") or data.get("services"):
+                    if data.get("ok") is True and data.get("source") == "live_ralfia_bridge":
+                        return _map_bridge_payload(data)
+                    return _unavailable_snapshot(settings, reason="bridge schema not valid live evidence")
             elif resp.status_code in (401, 403):
                 return _unavailable_snapshot(settings, reason=f"HTTP {resp.status_code}")
     except httpx.HTTPError:

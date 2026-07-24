@@ -82,6 +82,10 @@
     }
     .pipe-step.active { border-color: rgba(56, 189, 248, .5); box-shadow: 0 0 0 1px rgba(56,189,248,.2); }
     .pipe-step.done { border-color: rgba(52, 211, 153, .35); }
+    .pipe-step.fail { border-color: rgba(248, 113, 113, .45); }
+    .pipe-step.fail .state { color: var(--danger); }
+    .pipe-step.skip { border-color: rgba(251, 191, 36, .35); }
+    .pipe-step.skip .state { color: var(--warn); }
     .pipe-step .name { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
     .pipe-step .state { font-size: .75rem; color: var(--muted); margin-top: .35rem; }
     .spinner {
@@ -308,7 +312,7 @@
     })();
   </script>
   <script src="" id="liveopsI18nScript"></script>
-  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=12';</script>
+  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=13';</script>
 </head>
 <body>
   <div class="wrap">
@@ -599,6 +603,30 @@
       el.querySelector('.state').textContent = t('stateDone');
     }
 
+    function markRailFromStep(step) {
+      const el = pipelineRail.querySelector(`[data-agent="${step.agent}"]`);
+      if (!el) return;
+      el.classList.remove('active', 'done', 'fail', 'skip');
+      const stateEl = el.querySelector('.state');
+      const st = step.status || 'completed';
+      if (st === 'skipped' || st === 'failed') {
+        el.classList.add(st === 'failed' ? 'fail' : 'skip');
+        stateEl.textContent = st === 'failed' ? 'Unavailable' : 'Skipped';
+        return;
+      }
+      if (st === 'partial') {
+        el.classList.add('done');
+        stateEl.textContent = 'Partial';
+        return;
+      }
+      if (st === 'rejected') {
+        el.classList.add('fail');
+        stateEl.textContent = 'Rejected';
+        return;
+      }
+      markRailDone(step.agent);
+    }
+
     function renderStepCard(step) {
       const id = 'card-' + step.agent;
       let card = document.getElementById(id);
@@ -746,6 +774,14 @@
         proof.parasail_arbitrator ? 'Arbitrator:' + proof.parasail_arbitrator : '',
       ].filter(Boolean).join(' · ') || data.youcom_mode || '';
       document.getElementById('verdictAction').textContent = rec.recommended_action;
+      const sec = rec.security || {};
+      document.getElementById('decisionMsg').style.color = '';
+      document.getElementById('decisionMsg').textContent = '';
+      if (sec.approved === false) {
+        document.getElementById('decisionMsg').textContent =
+          'Security review did NOT approve remediation: ' + (sec.reasons || []).join('; ');
+        document.getElementById('decisionMsg').style.color = 'var(--warn)';
+      }
       document.getElementById('finalJson').textContent = JSON.stringify({
         recommendation: rec,
         metrics: data.metrics,
@@ -881,11 +917,11 @@
         setProgress(Math.min(95, 15 + streamStepCount * 18));
       } else if (event === 'agent_done') {
         renderStepCard(data.step);
-        markRailDone(data.step.agent);
+        markRailFromStep(data.step);
         streamStepCount += 1;
         setProgress(Math.min(95, 15 + streamStepCount * 18));
         const step = data.step || {};
-        if (step.agent === 'research' && step.status === 'completed') {
+        if (step.agent === 'research' && (step.status === 'completed' || step.status === 'partial')) {
           const md = step.metadata || {};
           appendTraceLine(
             'You.com MCP · search=' + (md.youcom_search_mode || '?') +
@@ -975,7 +1011,7 @@
         human: t('pipeHuman'),
       };
       pipelineRail.querySelectorAll('.pipe-step').forEach(el => {
-        el.classList.remove('active', 'done');
+        el.classList.remove('active', 'done', 'fail', 'skip');
         el.querySelector('.state').textContent = pipeNames[el.dataset.agent] || '';
       });
 

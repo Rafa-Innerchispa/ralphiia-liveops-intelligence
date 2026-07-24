@@ -19,6 +19,7 @@ from app.agents import (
     run_security_reviewer,
 )
 from app.config import Settings
+from app.provenance import canonical_citations
 from app.models import AgentName, AgentStep, Citation, FinalRecommendation, PipelineResult, SecurityVerdict
 
 HACKATHON_TRACK = "Multi-Agent Systems"
@@ -285,11 +286,12 @@ def _assemble_result(
     arbitrator = _step_by_name(steps, AgentName.arbitrator)
     security = SecurityVerdict.model_validate(reviewer.metadata["security"])
     local_hyps = local.hypotheses if local.status == "completed" else []
+    cites = canonical_citations(research.citations if research.status != "skipped" else [])
     recommendation = FinalRecommendation(
-        observed_facts=observer.facts,
+        observed_facts=observer.metadata.get("observed_facts") or observer.facts,
         hypotheses=list(dict.fromkeys(local_hyps + observer.hypotheses + research.hypotheses)),
         confidence=float(arbitrator.metadata.get("confidence", 0.5)),
-        citations=[Citation.model_validate(c) for c in arbitrator.citations],
+        citations=cites,
         recommended_action=arbitrator.metadata["recommended_action"],
         risk_level=arbitrator.metadata.get("risk_level", "medium"),
         requires_approval=True,
@@ -427,82 +429,117 @@ async def stream_pipeline(
     )
 
     steps: list[AgentStep] = []
+    effective = prompt
+    result_payload: dict | None = None
 
-    yield pack("agent_start", {"agent": "observer", "detail": "RalfIA :8101 read-only"})
-    for chunk in drain():
-        yield chunk
-    observer = await run_observer(settings, emit=emit)
-    for chunk in drain():
-        yield chunk
-    steps.append(observer)
-    yield pack("agent_done", {"step": observer.model_dump()})
+    try:
+        yield pack("agent_start", {"agent": "observer", "detail": "RalfIA :8101 read-only"})
+        for chunk in drain():
+            yield chunk
+        observer = await run_observer(settings, emit=emit)
+        for chunk in drain():
+            yield chunk
+        steps.append(observer)
+        yield pack("agent_done", {"step": observer.model_dump()})
 
-    effective = prompt_for_run_mode(run_mode, prompt, observer.facts)
-    web = needs_web_research(effective, force=research_deeper, run_mode=run_mode)
-    yield pack(
-        "plan",
-        {
-            "correlation_id": cid,
-            "user_prompt": effective,
-            "web_research": web,
-            "run_mode": run_mode,
-        },
-    )
+        effective = prompt_for_run_mode(run_mode, prompt, observer.facts)
+        web = needs_web_research(effective, force=research_deeper, run_mode=run_mode)
+        yield pack(
+            "plan",
+            {
+                "correlation_id": cid,
+                "user_prompt": effective,
+                "web_research": web,
+                "run_mode": run_mode,
+            },
+        )
 
-    yield pack("agent_start", {"agent": "local_analyst", "detail": "Ollama local OSS"})
-    for chunk in drain():
-        yield chunk
-    local = await run_local_analyst(settings, observer, emit=emit, user_prompt=effective)
-    for chunk in drain():
-        yield chunk
-    steps.append(local)
-    yield pack("agent_done", {"step": local.model_dump()})
+        yield pack("agent_start", {"agent": "local_analyst", "detail": "Ollama local OSS"})
+        for chunk in drain():
+            yield chunk
+        local = await run_local_analyst(settings, observer, emit=emit, user_prompt=effective)
+        for chunk in drain():
+            yield chunk
+        steps.append(local)
+        yield pack("agent_done", {"step": local.model_dump()})
 
-    yield pack("agent_start", {"agent": "research", "detail": "You.com MCP"})
-    for chunk in drain():
-        yield chunk
-    research = await run_research(
-        settings, observer, emit=emit, user_prompt=effective, skip_web=not web
-    )
-    for chunk in drain():
-        yield chunk
-    steps.append(research)
-    yield pack("agent_done", {"step": research.model_dump()})
+        yield pack("agent_start", {"agent": "research", "detail": "You.com MCP"})
+        for chunk in drain():
+            yield chunk
+        research = await run_research(
+            settings, observer, emit=emit, user_prompt=effective, skip_web=not web
+        )
+        for chunk in drain():
+            yield chunk
+        steps.append(research)
+        yield pack("agent_done", {"step": research.model_dump()})
 
-    yield pack("agent_start", {"agent": "security_reviewer", "detail": "Parasail"})
-    for chunk in drain():
-        yield chunk
-    reviewer = await run_security_reviewer(settings, observer, research, emit=emit)
-    for chunk in drain():
-        yield chunk
-    steps.append(reviewer)
-    yield pack("agent_done", {"step": reviewer.model_dump()})
+        yield pack("agent_start", {"agent": "security_reviewer", "detail": "Parasail"})
+        for chunk in drain():
+            yield chunk
+        reviewer = await run_security_reviewer(settings, observer, research, emit=emit)
+        for chunk in drain():
+            yield chunk
+        steps.append(reviewer)
+        yield pack("agent_done", {"step": reviewer.model_dump()})
 
-    yield pack("agent_start", {"agent": "arbitrator", "detail": "Parasail + human checkpoint"})
-    for chunk in drain():
-        yield chunk
-    arbitrator = await run_arbitrator(settings, observer, research, reviewer, emit=emit)
-    for chunk in drain():
-        yield chunk
-    steps.append(arbitrator)
-    yield pack("agent_done", {"step": arbitrator.model_dump()})
+        yield pack("agent_start", {"agent": "arbitrator", "detail": "Parasail + human checkpoint"})
+        for chunk in drain():
+            yield chunk
+        arbitrator = await run_arbitrator(settings, observer, research, reviewer, emit=emit)
+        for chunk in drain():
+            yield chunk
+        steps.append(arbitrator)
+        yield pack("agent_done", {"step": arbitrator.model_dump()})
 
-    result = _assemble_result(
-        settings, cid, session_id, steps, time.perf_counter() - t0, effective
-    )
-    yield pack(
-        "data_flow",
-        {
-            "agent": "human",
-            "kind": "checkpoint",
-            "title": "Human approval",
-            "explain": (
-                "Approve/Reject only records checkpoint — no production mutations (dry-run)."
-            ),
-            "payload": {"requires_approval": True, "dry_run": True},
-        },
-    )
-    yield pack("complete", {"result": result.model_dump()})
+        result = _assemble_result(
+            settings, cid, session_id, steps, time.perf_counter() - t0, effective
+        )
+        yield pack(
+            "data_flow",
+            {
+                "agent": "human",
+                "kind": "checkpoint",
+                "title": "Human approval",
+                "explain": (
+                    "Approve/Reject only records checkpoint — no production mutations (dry-run)."
+                ),
+                "payload": {"requires_approval": True, "dry_run": True},
+            },
+        )
+        result_payload = result.model_dump()
+        yield pack("complete", {"result": result_payload})
+    except Exception as exc:
+        if steps:
+            effective = prompt_for_run_mode(run_mode, prompt, steps[0].facts)
+            result = _assemble_result(
+                settings, cid, session_id, steps, time.perf_counter() - t0, effective
+            )
+            result_payload = result.model_dump()
+            result_payload["error"] = str(exc)
+        else:
+            result_payload = {
+                "correlation_id": cid,
+                "session_id": session_id,
+                "error": str(exc),
+                "steps": [],
+                "operator_summary": f"Pipeline error (dry-run): {exc}",
+            }
+        yield pack("error", {"message": str(exc)})
+        yield pack("complete", {"result": result_payload})
+    finally:
+        if result_payload is None:
+            yield pack(
+                "complete",
+                {
+                    "result": {
+                        "correlation_id": cid,
+                        "session_id": session_id,
+                        "error": "stream ended without result",
+                        "steps": [s.model_dump() for s in steps],
+                    }
+                },
+            )
 
 
 async def run_baseline_single_agent(settings: Settings) -> dict:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.provenance import is_live_source
+
 
 def service_matrix_from_snapshot(snap: dict[str, Any]) -> dict[str, list[str]]:
     """Classify services for operator-facing reports (no secrets)."""
@@ -34,26 +36,41 @@ def service_matrix_from_snapshot(snap: dict[str, Any]) -> dict[str, list[str]]:
             "Live infrastructure probe unavailable — configure bridge or run from LAN; "
             "not using hidden fixture."
         )
+        degraded.append(
+            "Demo scenario (not observed live): Evolution on .5 — health down narrative for hackathon only."
+        )
     elif snap.get("source", "").startswith("fixture"):
         degraded.append("RalfIA live probe unavailable — using labeled fallback fixture")
 
-    evo_state = snap.get("system_state") or "unknown"
-    evo_health = snap.get("health") or "unknown"
-    evo_name = snap.get("service") or "Evolution API"
-    node = snap.get("node_label") or ".5"
-    if evo_health == "down" or (evo_state == "active" and evo_health != "up"):
-        down.append(
-            f"{evo_name} on node {node} — systemd={evo_state}, health probe={evo_health} "
-            "(operator-reported WhatsApp line blocked; dry-run — no recover/restart)"
-        )
-    else:
-        up.append(f"{evo_name} on node {node} — systemd={evo_state}, health={evo_health}")
+    if is_live_source(snap.get("source") or ""):
+        evo_state = snap.get("system_state") or "unknown"
+        evo_health = snap.get("health") or "unknown"
+        evo_name = snap.get("service") or "Evolution API"
+        node = snap.get("node_label") or ".5"
+        if evo_health == "down" or (evo_state == "active" and evo_health != "up"):
+            down.append(
+                f"{evo_name} on node {node} — systemd={evo_state}, health probe={evo_health} "
+                "(operator-reported WhatsApp line blocked; dry-run — no recover/restart)"
+            )
+        else:
+            up.append(f"{evo_name} on node {node} — systemd={evo_state}, health={evo_health}")
 
     return {"up": up, "degraded": degraded, "down": down}
 
 
 def format_service_status_block(snap: dict[str, Any]) -> str:
     m = service_matrix_from_snapshot(snap)
+    src = snap.get("source") or ""
+    if src == "live_unavailable":
+        lines = ["Live infrastructure probe (read-only)", "", "Unhealthy / blocking:"]
+        lines.extend(f"  • {x}" for x in m["down"])
+        if m["degraded"]:
+            lines.append("")
+            lines.append("Degraded / demo context (not observed live):")
+            lines.extend(f"  • {x}" for x in m["degraded"])
+        lines.append("")
+        lines.append(f"Evidence: {snap.get('source_label', src)}.")
+        return "\n".join(lines)
     lines = ["Live infrastructure snapshot (read-only)"]
     if m["down"]:
         lines.append("")

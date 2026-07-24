@@ -4,7 +4,13 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from app.models import AgentName, AgentStep, Citation, SecurityVerdict
-from app.prompt_routing import build_research_query
+from app.provenance import (
+    build_sanitized_research_query,
+    canonical_citations,
+    observer_facts_from_snap,
+    sanitize_operator_prompt,
+)
+from app.prompt_routing import INVESTIGATE_DEFAULT_PROMPT, STATUS_DEFAULT_PROMPT
 from app.ralfia_client import fetch_live_status, INCIDENT_FIXTURE
 from app.ops_brief import (
     build_status_only_recommendation,
@@ -46,16 +52,27 @@ async def run_observer(settings: Settings, emit: DataEmitter = None) -> AgentSte
     )
     snap = await fetch_live_status(settings)
     matrix = service_matrix_from_snapshot(snap)
+    source = snap.get("source") or ""
+    live_ok = source in ("ralfia_health_readonly", "ralfia_bridge_live")
+    response_title = (
+        "Live snapshot received"
+        if live_ok
+        else "Bridge reached, but live evidence unavailable"
+    )
     await _flow(
         emit,
         {
             "agent": "observer",
             "kind": "response",
-            "title": "Live snapshot received",
+            "title": response_title,
             "explain": (
                 f"Source: {snap.get('source_label')}. "
-                f"{snap.get('service')} node {snap.get('node_label')}: "
-                f"systemd={snap.get('system_state')}, health={snap.get('health')}."
+                + (
+                    f"{snap.get('service')} node {snap.get('node_label')}: "
+                    f"systemd={snap.get('system_state')}, health={snap.get('health')}."
+                    if live_ok
+                    else "No validated live service matrix — demo context kept separate."
+                )
             ),
             "payload": {
                 "source": snap.get("source"),
@@ -63,53 +80,36 @@ async def run_observer(settings: Settings, emit: DataEmitter = None) -> AgentSte
                 "system_state": snap.get("system_state"),
                 "services_down": matrix["down"],
                 "services_degraded": matrix["degraded"],
+                "live_validated": live_ok,
             },
         },
     )
     source_label = snap.get("source_label") or snap.get("source", "unknown")
-    facts = [
-        f"Data source: {source_label}.",
-        f"Checked at: {snap.get('checked_at', 'now')}.",
-    ]
-    for line in matrix["down"]:
-        facts.append(f"UNHEALTHY: {line}")
-    for line in matrix["degraded"]:
-        facts.append(f"DEGRADED: {line}")
-    for line in matrix["up"]:
-        facts.append(f"HEALTHY: {line}")
-    if not matrix["down"] and not matrix["degraded"]:
-        facts.append(snap["summary"])
-    else:
-        facts.append(f"Incident context: {snap['summary']}")
-    ralfia = snap.get("ralfia_status") or {}
-    if ralfia:
-        if ralfia.get("mongodb_ok") is not None:
-            facts.append(
-                f"RalfIA MongoDB ok={ralfia.get('mongodb_ok')}, "
-                f"clients={ralfia.get('mongodb_clients')}, "
-                f"pipeline={ralfia.get('mongodb_pipeline_items')}."
-            )
-        if ralfia.get("integration_mode"):
-            facts.append(
-                f"RalfIA integration mode={ralfia.get('integration_mode')} "
-                f"(http {ralfia.get('http_port')}, mcp {ralfia.get('mcp_port')})."
-            )
+    observed, demo = observer_facts_from_snap(snap, matrix)
+    facts = observed + demo
     hypotheses = [
         "Session or number block on WhatsApp line (operator-reported).",
         "Health probe mismatch while systemd unit remains active.",
     ]
+    obs_status = "failed" if source == "live_unavailable" else "completed"
     return AgentStep(
         agent=AgentName.observer,
-        status="completed",
+        status=obs_status,
         started_at=started,
         finished_at=_now(),
-        summary="Observed dual-node incident snapshot without side effects.",
+        summary=(
+            "Live probe validated."
+            if live_ok
+            else "Live probe unavailable — demo context labeled separately."
+        ),
         facts=facts,
         hypotheses=hypotheses,
         metadata={
             "evidence_ref": snap.get("evidence_ref"),
             "source": snap.get("source"),
             "dry_run": True,
+            "demo_context": demo,
+            "observed_facts": observed,
             "snap": {
                 "node_label": snap.get("node_label"),
                 "service": snap.get("service"),
@@ -264,7 +264,9 @@ async def run_research(
         )
 
     client = YouComClient(settings)
-    query = build_research_query(user_prompt or "", observer.facts)
+    observed = observer.metadata.get("observed_facts") or observer.facts[:8]
+    demo = observer.metadata.get("demo_context") or []
+    query = build_sanitized_research_query(user_prompt or "", observed, demo)
     await _flow(
         emit,
         {
@@ -280,13 +282,30 @@ async def run_research(
         },
     )
     search_hits, search_mode = await client.search(query)
+    if search_mode.endswith("_live") and search_hits:
+        first = search_hits[0]
+        sn = str(first.get("snippet") or "")
+        if "422" in sn or "Failed to perform search" in sn:
+            search_hits = []
+            search_mode = "mcp_search_error"
+    if search_mode == "mcp_search_error":
+        search_title = "Search failed (422) — continuing with you-research only"
+        search_explain = (
+            "Malformed or rejected you-search response; research MCP may still succeed."
+        )
+    elif search_hits:
+        search_title = f"Search OK · {len(search_hits)} resultados"
+        search_explain = f"Modo {search_mode}. Estos URLs alimentan Contents y Research."
+    else:
+        search_title = f"Search · 0 results ({search_mode})"
+        search_explain = f"Modo {search_mode}. Contents skipped if no URL."
     await _flow(
         emit,
         {
             "agent": "research",
             "kind": "response",
-            "title": f"Search OK · {len(search_hits)} resultados",
-            "explain": f"Modo {search_mode}. Estos URLs alimentan Contents y Research.",
+            "title": search_title,
+            "explain": search_explain,
             "payload": {
                 "mode": search_mode,
                 "hits": [
@@ -338,12 +357,22 @@ async def run_research(
         },
     )
     research_report, research_cites, research_mode = await client.research(query)
+    pre_cites = canonical_citations(
+        [
+            Citation(
+                title=c.get("title") or "Research source",
+                url=c.get("url") or "",
+                snippet=str(c.get("snippet") or "")[:500],
+            )
+            for c in research_cites
+        ]
+    )
     await _flow(
         emit,
         {
             "agent": "research",
             "kind": "response",
-            "title": f"Research OK · {len(research_cites)} citas",
+            "title": f"Research OK · {len(pre_cites)} citas",
             "explain": f"Modo {research_mode}. Informe sintetizado para Security y Arbitrator.",
             "payload": {
                 "mode": research_mode,
@@ -356,23 +385,28 @@ async def run_research(
         },
     )
 
-    citations: list[Citation] = []
-    for hit in search_hits:
-        citations.append(
+    citations = canonical_citations(
+        [
             Citation(
                 title=hit.get("title") or "Source",
                 url=hit.get("url") or "",
                 snippet=str(hit.get("snippet") or "")[:500],
             )
-        )
-    for hit in research_cites:
-        citations.append(
+            for hit in search_hits
+        ]
+        + [
             Citation(
                 title=hit.get("title") or "Research source",
                 url=hit.get("url") or "",
                 snippet=str(hit.get("snippet") or "")[:500],
             )
-        )
+            for hit in research_cites
+        ]
+    )
+
+    research_status = "completed"
+    if search_mode == "mcp_search_error" and research_mode == "mcp_live":
+        research_status = "partial"
 
     preview = research_report[:1200].strip()
     facts = [
@@ -390,7 +424,7 @@ async def run_research(
 
     return AgentStep(
         agent=AgentName.research,
-        status="completed",
+        status=research_status,
         started_at=started,
         finished_at=_now(),
         summary="Web investigation with Search + Research (+ Contents when available).",
@@ -516,9 +550,10 @@ async def run_security_reviewer(
             },
         )
 
+    rev_status = "completed" if verdict.approved else "rejected"
     return AgentStep(
         agent=AgentName.security_reviewer,
-        status="completed",
+        status=rev_status,
         started_at=started,
         finished_at=_now(),
         summary="Security review complete.",
@@ -571,7 +606,7 @@ async def run_arbitrator(
         confidence = 0.82
         snap = observer.metadata.get("snap") or {}
         if snap:
-            full_snap = {**INCIDENT_FIXTURE, **snap}
+            full_snap = dict(snap)
             full_snap["source_label"] = (
                 snap.get("source_label")
                 or observer.metadata.get("source")
@@ -581,10 +616,10 @@ async def run_arbitrator(
         else:
             recommendation = build_status_only_recommendation(
                 {
-                    "node_label": ".5",
+                    "node_label": "unknown",
                     "service": "Evolution API",
-                    "system_state": "active",
-                    "health": "down",
+                    "system_state": "unknown",
+                    "health": "unknown",
                     "source_label": "Live probe",
                     "summary": observer.facts[0] if observer.facts else "",
                     "ralfia_status": {},
@@ -616,7 +651,12 @@ async def run_arbitrator(
             },
         )
         if llm.configured():
-            full_snap = {**INCIDENT_FIXTURE, **(observer.metadata.get("snap") or {})}
+            snap = observer.metadata.get("snap") or {}
+            src = snap.get("source") or observer.metadata.get("source") or ""
+            if src in ("ralfia_health_readonly", "ralfia_bridge_live"):
+                full_snap = {**INCIDENT_FIXTURE, **snap}
+            else:
+                full_snap = snap
             status_block = format_service_status_block(full_snap)
             user = (
                 f"Live status:\n{status_block}\n\n"
@@ -643,9 +683,15 @@ async def run_arbitrator(
             except Exception:
                 llm_mode = "rules_fallback"
         recommendation = merge_recommendation_with_snapshot(
-            {**INCIDENT_FIXTURE, **(observer.metadata.get("snap") or {})},
+            observer.metadata.get("snap") or {},
             recommendation,
         )
+        if not security.approved:
+            recommendation = (
+                "Security review did NOT approve proposed remediation.\n"
+                f"Reasons: {'; '.join(security.reasons)}\n\n"
+                f"{recommendation}"
+            )
         await _flow(
             emit,
             {
@@ -662,15 +708,17 @@ async def run_arbitrator(
             },
         )
 
+    cites = canonical_citations(research.citations[:12])
+
     return AgentStep(
         agent=AgentName.arbitrator,
         status="completed",
         started_at=started,
         finished_at=_now(),
         summary=recommendation,
-        facts=observer.facts[:3],
+        facts=observer.metadata.get("observed_facts") or observer.facts[:3],
         hypotheses=research.hypotheses[:2],
-        citations=research.citations[:6],
+        citations=cites,
         metadata={
             "confidence": confidence,
             "risk_level": risk_level,

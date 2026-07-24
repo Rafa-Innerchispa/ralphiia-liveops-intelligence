@@ -35,6 +35,8 @@ class YouComClient:
         }
 
     async def search(self, query: str, count: int = 5) -> tuple[list[dict], str]:
+        if not self.api_key and self.settings.resolved_data_mode() == "fixture":
+            return self._fixture_search(query), "fixture"
         if self._use_mcp():
             try:
                 return await self._mcp.search(query, count=count)
@@ -57,6 +59,8 @@ class YouComClient:
         return await self._contents_rest(url)
 
     async def research(self, query: str) -> tuple[str, list[dict], str]:
+        if not self.api_key and self.settings.resolved_data_mode() == "fixture":
+            return self._fixture_research(query)
         if self._use_mcp():
             try:
                 return await self._mcp.research(query)

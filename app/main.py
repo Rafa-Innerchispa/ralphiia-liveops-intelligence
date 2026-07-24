@@ -268,19 +268,22 @@ async def _analyze_stream_response(body: AnalyzeRequest) -> StreamingResponse:
                 for line in chunk.split("\n"):
                     if line.startswith("data: "):
                         payload = _json.loads(line[6:])
-                        _last_result = PipelineResult.model_validate(payload["result"])
-                        save_pipeline_result(
-                            session_id, _last_result.model_dump()
-                        )
-                        record_assistant_summary(
-                            session_id, _last_result.operator_summary or ""
-                        )
-                        _notify_complete(
-                            settings,
-                            cid,
-                            prompt,
-                            _last_result.operator_summary or None,
-                        )
+                        try:
+                            _last_result = PipelineResult.model_validate(payload["result"])
+                            save_pipeline_result(
+                                session_id, _last_result.model_dump()
+                            )
+                            record_assistant_summary(
+                                session_id, _last_result.operator_summary or ""
+                            )
+                            _notify_complete(
+                                settings,
+                                cid,
+                                prompt,
+                                _last_result.operator_summary or None,
+                            )
+                        except Exception:
+                            pass
                         break
 
     return StreamingResponse(

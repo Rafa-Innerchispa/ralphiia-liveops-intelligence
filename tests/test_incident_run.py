@@ -33,6 +33,7 @@ def test_cited_answer_no_blocked_line_when_healthy():
         snap, matrix, cites, security_approved=True, security_reasons=[]
     )
     assert "blocked line" not in text.lower()
-    assert "What is healthy" in text
+    assert "What is reachable / observed" in text
+    assert "https://example.com/a" in text
     assert "[1]" in text
-    assert "capacity exhaustion" in text.lower() or "does not prove" in text.lower()
+    assert "good shape" not in text.lower()

@@ -47,7 +47,7 @@ def observer_facts_from_snap(snap: dict[str, Any], matrix: dict[str, list[str]])
         for line in matrix["degraded"]:
             observed.append(f"DEGRADED: {line}")
         for line in matrix["up"]:
-            observed.append(f"HEALTHY: {line}")
+            observed.append(f"OBSERVED: {line}")
         if snap.get("summary"):
             observed.append(f"Summary: {snap['summary']}")
     elif source == "live_unavailable":

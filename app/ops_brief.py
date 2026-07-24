@@ -19,10 +19,13 @@ def service_matrix_from_snapshot(snap: dict[str, Any]) -> dict[str, list[str]]:
             f"HTTP :{ralfia.get('http_port', '8101')}, MCP :{ralfia.get('mcp_port', '8102')}"
         )
         if ralfia.get("mongodb_ok") is True:
+            db = ralfia.get("mongodb_db", "db")
+            clients = ralfia.get("mongodb_clients")
+            items = ralfia.get("mongodb_pipeline_items")
             up.append(
-                f"MongoDB ({ralfia.get('mongodb_db', 'db')}) — "
-                f"clients={ralfia.get('mongodb_clients')}, "
-                f"pipeline_items={ralfia.get('mongodb_pipeline_items')}"
+                f"MongoDB ({db}) is reachable; snapshot reports "
+                f"clients={clients}, pipeline_items={items} "
+                "(counts alone do not prove health)."
             )
         elif ralfia.get("mongodb_ok") is False:
             down.append("MongoDB — probe reports ok=false")
@@ -82,7 +85,7 @@ def format_service_status_block(snap: dict[str, Any]) -> str:
         lines.extend(f"  • {x}" for x in m["degraded"])
     if m["up"]:
         lines.append("")
-        lines.append("Healthy / reachable:")
+        lines.append("Reachable / observed:")
         lines.extend(f"  • {x}" for x in m["up"])
     lines.append("")
     lines.append(f"Evidence: {snap.get('source_label', snap.get('source', '?'))}.")

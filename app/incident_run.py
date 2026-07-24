@@ -65,12 +65,12 @@ def build_cited_investigate_answer(
     watch = matrix["degraded"] + matrix["down"]
     lines: list[str] = []
 
-    lines.append("What is healthy")
+    lines.append("What is reachable / observed")
     if healthy:
         for h in healthy[:5]:
             lines.append(f"• {h}")
     else:
-        lines.append("• No services marked healthy in this snapshot.")
+        lines.append("• No reachable services reported in this snapshot.")
 
     lines.append("")
     lines.append("What needs investigation")
@@ -88,25 +88,39 @@ def build_cited_investigate_answer(
 
     lines.append("")
     lines.append("Recommended read-only next steps")
-    steps = [
+    step_templates = [
         (
-            "Categorize errors by tool, code, and time window; compare error rate with "
-            "latency and CPU/memory metrics."
+            "Categorize MCP errors by tool, code, and time window",
+            "log categorization and error taxonomy",
         ),
         (
-            "Use structured logs and distributed tracing to find repeated failure patterns "
-            "before any restart or config change."
+            "Compare error rate with latency, CPU, and memory before attributing capacity issues",
+            "error-rate and time-window analysis",
         ),
         (
-            "Review MCP server monitoring practices (logging, tracing, tool-level metrics)."
+            "Add request-scoped tracing to correlate repeated MCP failures",
+            "tracing and latency correlation",
         ),
     ]
-    for i, step in enumerate(steps[: min(3, max(1, len(citations)))], start=1):
-        ref = f" [{i}]" if i <= len(citations) else ""
-        lines.append(f"• {step}{ref}")
+    n = min(len(step_templates), max(1, len(citations)))
+    for i in range(n):
+        step_text, _ = step_templates[i]
+        if i < len(citations):
+            c = citations[i]
+            lines.append(
+                f"• {step_text} [{i + 1}] {c.title} — {c.url}"
+            )
+        else:
+            lines.append(f"• {step_text}")
     lines.append(
-        "• No restart or production change is justified by the current evidence alone."
+        "• No restart or production configuration change is recommended from current evidence."
     )
+
+    if citations:
+        lines.append("")
+        lines.append("Sources (canonical index)")
+        for i, c in enumerate(citations[:12], start=1):
+            lines.append(f"[{i}] {c.title} — {c.url}")
 
     lines.append("")
     lines.append("Security review")

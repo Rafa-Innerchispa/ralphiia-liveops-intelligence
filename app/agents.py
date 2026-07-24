@@ -619,13 +619,14 @@ async def run_arbitrator(
         "down": [],
         "degraded": [],
     }
-    cites_preview = canonical_citations(research.citations[:12])
+    cites_preview = canonical_citations(research.citations)
     recommendation = rules_fallback_recommendation(snap_meta, cites_preview, security)
     confidence = 0.72 if cites_preview else 0.45
     if security.approved:
         confidence = min(0.9, confidence + 0.08)
     risk_level = "low" if not matrix["down"] else "medium"
-    llm_mode = "rules"
+    llm_mode = "rules_fallback"
+    arbitration_fallback_reason: str | None = "initial_rules_template"
     llm = ParasailClient(settings)
     status_only = research.status == "skipped"
     if status_only:
@@ -682,7 +683,7 @@ async def run_arbitrator(
             status_block = format_service_status_block(full_snap)
             cite_lines = [
                 f"[{i}] {c.title} — {c.url}"
-                for i, c in enumerate(cites_preview[:6], start=1)
+                for i, c in enumerate(cites_preview[:12], start=1)
             ]
             user = (
                 f"Operator question context: {observer.metadata.get('user_prompt') or ''}\n"
@@ -690,8 +691,9 @@ async def run_arbitrator(
                 f"Observer facts:\n"
                 + "\n".join(f"- {f}" for f in (observer.metadata.get("observed_facts") or observer.facts)[:8])
                 + "\n\nWrite a structured English answer with sections: "
-                "What is healthy, What needs investigation, Recommended read-only next steps "
-                "(each step with [n] citation index when applicable), Security review. "
+                "What is reachable / observed, What needs investigation, Recommended read-only next steps "
+                "(each step with [n] citation index and URL when applicable), Security review. "
+                "Do NOT infer MongoDB health from client counts alone — state reachable + counts only. "
                 "Do NOT mention blocked WhatsApp lines unless health=down in snapshot. "
                 "Do NOT claim capacity exhaustion from error counts alone.\n"
                 f"Citations:\n" + "\n".join(cite_lines)
@@ -703,20 +705,41 @@ async def run_arbitrator(
                 "Use only live snapshot facts; separate facts from hypotheses."
             )
             try:
-                text, llm_mode = await llm.chat(system, user, max_tokens=700)
+                text, chat_mode = await llm.chat(system, user, max_tokens=700)
                 parsed = ParasailClient.parse_json_block(text)
-                if parsed.get("recommended_action"):
-                    recommendation = str(parsed["recommended_action"])
+                action = parsed.get("recommended_action")
+                if action:
+                    recommendation = str(action)
+                    llm_mode = chat_mode
+                    arbitration_fallback_reason = None
                     if "blocked line" in recommendation.lower() and snap.get("health") != "down":
                         recommendation = rules_fallback_recommendation(
                             snap_meta, cites_preview, security
                         )
+                        arbitration_fallback_reason = "sanitized_stale_narrative"
+                    if "good shape" in recommendation.lower():
+                        recommendation = rules_fallback_recommendation(
+                            snap_meta, cites_preview, security
+                        )
+                        arbitration_fallback_reason = (
+                            arbitration_fallback_reason or "sanitized_mongodb_inference"
+                        )
+                elif parsed.get("raw") and len(str(parsed.get("raw"))) > 120:
+                    recommendation = str(parsed["raw"])
+                    llm_mode = chat_mode
+                    arbitration_fallback_reason = None
+                else:
+                    llm_mode = "rules_fallback"
+                    arbitration_fallback_reason = "parasail_response_missing_recommended_action"
                 if parsed.get("confidence") is not None:
                     confidence = float(parsed["confidence"])
                 if parsed.get("risk_level"):
                     risk_level = str(parsed["risk_level"])
-            except Exception:
+            except Exception as exc:
                 llm_mode = "rules_fallback"
+                arbitration_fallback_reason = str(exc)[:160]
+        else:
+            arbitration_fallback_reason = "parasail_not_configured"
         if not security.approved:
             recommendation = (
                 "Security review did NOT approve proposed remediation.\n"
@@ -733,6 +756,7 @@ async def run_arbitrator(
                 "transport": f"POST {settings.parasail_base_url}/chat/completions",
                 "payload": {
                     "parasail_mode": llm_mode,
+                    "arbitration_fallback_reason": arbitration_fallback_reason,
                     "confidence": confidence,
                     "risk_level": risk_level,
                 },
@@ -760,5 +784,6 @@ async def run_arbitrator(
             "recommended_action": recommendation,
             "security": security.model_dump(),
             "parasail_mode": llm_mode,
+            "arbitration_fallback_reason": arbitration_fallback_reason,
         },
     )

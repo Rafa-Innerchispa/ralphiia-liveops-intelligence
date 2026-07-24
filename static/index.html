@@ -960,6 +960,16 @@
             );
           }
         }
+        if (step.agent === 'arbitrator') {
+          const md = step.metadata || {};
+          if (md.arbitration_fallback_reason) {
+            appendTraceLine(
+              'Arbitrator · ' + (md.parasail_mode || '?') +
+                ' · fallback: ' + md.arbitration_fallback_reason,
+              't-plan'
+            );
+          }
+        }
       } else if (event === 'complete') {
         renderVerdict(data.result);
         if (data.result && data.result.incident_id) {

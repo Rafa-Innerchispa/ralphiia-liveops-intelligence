@@ -16,14 +16,15 @@ Public URL goal: stable **Render Web Service** for judges. **ngrok** (`LIVEOPS_P
    | `ONE_SECRET` | Yes (act 3) | One MCP → GitHub issue |
    | `GITHUB_REPO_OWNER` | Yes | e.g. `Rafa-Innerchispa` |
    | `GITHUB_REPO_NAME` | Yes | `ralphiia-liveops-intelligence` |
-   | `GITHUB_TOKEN` | Fallback | If One MCP fails (PAT `repo` scope) |
-   | `RALFIA_STATUS_URL` | Hybrid | Public HTTPS URL to **read-only** RalfIA `/status` (not LAN IP) |
+   | `RALFIA_STATUS_URL` | Hybrid | e.g. `https://liveops-bridge.pcdoctor.ai/liveops-bridge/status` |
+   | `RALFIA_STATUS_TOKEN` | Hybrid | Same bearer as home bridge `.env` (never commit) |
+   | `GITHUB_TOKEN` | Fallback | If One MCP fails (PAT `repo` scope) — **keep for act 3 until ONE_SECRET is set** |
 
 5. Deploy → open `https://<service>.onrender.com/health` → run demo **1 · Check Live Status** then **2 · Investigate**.
 
 ## Hybrid honesty
 
-- **On Render:** Observer is **live** only if `RALFIA_STATUS_URL` points to a reachable bridge; otherwise UI shows **Fallback fixture** (labeled).
+- **On Render:** Observer is **live** only if `RALFIA_STATUS_URL` + `RALFIA_STATUS_TOKEN` reach the bridge; otherwise UI shows **Unavailable** (no silent fixture). See `docs/BRIDGE.md`.
 - **Ollama** on home LAN is **not** reachable from Render unless you expose a secured endpoint; local/ngrok demo keeps full stack.
 
 ## Verify

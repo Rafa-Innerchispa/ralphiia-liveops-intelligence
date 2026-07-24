@@ -1,0 +1,9 @@
+{
+  "tool": "Opsera Agents (Cursor IDE)",
+  "scope": "Development-time security and architecture review — not invoked during LiveOps runtime queries",
+  "status": "documented",
+  "verdict": null,
+  "scanned_at": null,
+  "summary": "Run Opsera Agents scan in Cursor on this repository before submission; replace this file with real PASS/WARN/FAIL output for judges.",
+  "partner_note": "Opsera partner prize: evidence from IDE review, not a fake runtime agent card."
+}

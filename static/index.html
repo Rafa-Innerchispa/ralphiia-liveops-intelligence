@@ -308,7 +308,7 @@
     })();
   </script>
   <script src="" id="liveopsI18nScript"></script>
-  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=11';</script>
+  <script>document.getElementById('liveopsI18nScript').src = window.__LIVEOPS_BASE__ + '/static/i18n.js?v=12';</script>
 </head>
 <body>
   <div class="wrap">
@@ -462,7 +462,20 @@
     }
 
     function t(key) {
-      return (window.LiveOpsI18n && window.LiveOpsI18n.t(key)) || key;
+      const v = window.LiveOpsI18n && window.LiveOpsI18n.t(key);
+      if (v && v !== key) return v;
+      const fallbacks = {
+        promptLiveStatus:
+          'What is currently unhealthy in my infrastructure? Use live read-only evidence only.',
+        promptInvestigate:
+          'Evaluate my servers with web-backed recommendations and citations. Do not change production.',
+        errStream: 'Stream failed',
+        errBackend: 'Could not reach backend /health',
+        stateRunning: 'Running…',
+        ctaLiveStatus: '1 · Check Live Status',
+        ctaInvestigate: '2 · Investigate with Live Sources',
+      };
+      return fallbacks[key] || key;
     }
 
     function applyLangUI() {
@@ -871,6 +884,25 @@
         markRailDone(data.step.agent);
         streamStepCount += 1;
         setProgress(Math.min(95, 15 + streamStepCount * 18));
+        const step = data.step || {};
+        if (step.agent === 'research' && step.status === 'completed') {
+          const md = step.metadata || {};
+          appendTraceLine(
+            'You.com MCP · search=' + (md.youcom_search_mode || '?') +
+              ' · research=' + (md.youcom_research_mode || '?') +
+              ' · cites=' + ((step.citations || []).length),
+            't-res'
+          );
+          (step.citations || []).slice(0, 4).forEach(c => {
+            if (c && c.url) appendTraceLine('  cite · ' + c.url, 't-res');
+          });
+          if (md.research_preview) {
+            appendTraceLine(
+              '  preview · ' + String(md.research_preview).slice(0, 120) + '…',
+              't-res'
+            );
+          }
+        }
       } else if (event === 'complete') {
         renderVerdict(data.result);
         const proof = (data.result.metrics || {}).api_proof || {};

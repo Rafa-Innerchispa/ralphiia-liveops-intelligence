@@ -1164,8 +1164,10 @@
       const title = document.getElementById('issueTitle').value.trim();
       const body = document.getElementById('issueBody').value.trim();
       const msg = document.getElementById('issueCreateMsg');
+      const createBtn = document.getElementById('issueCreateBtn');
       msg.style.color = 'var(--muted)';
       msg.textContent = t('stateRunning');
+      createBtn.disabled = true;
       try {
         const r = await loFetch(BASE + '/api/incident/create', {
           method: 'POST',
@@ -1185,10 +1187,23 @@
           ? t('issueCreated') + ' <a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>'
           : JSON.stringify(data.issue);
         appendTraceLine('GITHUB ISSUE · via ' + (data.issue.via || '?') + ' · ' + (url || ''), 't-res');
+        if (url) {
+          appendChat('LiveOps', t('issueCreated') + ' ' + url, 'ops');
+        }
+        incidentModal.classList.remove('open');
+        msg.textContent = '';
+        createBtn.disabled = false;
       } catch (e) {
         msg.style.color = 'var(--danger)';
         msg.textContent = e.message;
+        createBtn.disabled = false;
       }
+    }
+
+    function closeIncidentModal() {
+      incidentModal.classList.remove('open');
+      document.getElementById('issueCreateMsg').textContent = '';
+      document.getElementById('issueCreateBtn').disabled = false;
     }
 
     async function quickProbe() {
@@ -1258,8 +1273,14 @@
     btnInvestigate.onclick = () => runStream('investigate', false);
     btnRenderWorkflow.onclick = () => runRenderWorkflow();
     btnGitHubIncident.onclick = () => openIncidentPreview();
-    document.getElementById('issueCancelBtn').onclick = () => incidentModal.classList.remove('open');
+    document.getElementById('issueCancelBtn').onclick = () => closeIncidentModal();
     document.getElementById('issueCreateBtn').onclick = () => createIncidentFromPreview();
+    incidentModal.addEventListener('click', (ev) => {
+      if (ev.target === incidentModal) closeIncidentModal();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && incidentModal.classList.contains('open')) closeIncidentModal();
+    });
     document.getElementById('incidentBtn').onclick = () => {
       promptInput.value = t('promptInvestigate');
       runStream('investigate', false);

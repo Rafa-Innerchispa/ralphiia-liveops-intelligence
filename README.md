@@ -8,11 +8,11 @@ Evidence-first LiveOps for distributed ops teams: live read-only probes, web-bac
 
 ## Live hackathon status (verified on Render)
 
-Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hackathon/youcom-liveops-20260724` · **Repo commit:** `0f575a3` (workflow real) · **Last verified:** 2026-07-25 UTC
+Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hackathon/youcom-liveops-20260724` · **Repo HEAD:** `02af7aa` · **Last verified:** 2026-07-25 UTC
 
-**Honest audit:** [Issue #5](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues/5) (historical). **Workflow details:** this README + commit `0f575a3`.
+**Honest audit:** [Issue #5](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues/5). **Workflow runner:** `0f575a3` · **In-process UX polish:** `c92e143` · **Workflow verdict UI:** `02af7aa` · **Approve button label:** `88173af` · **Act 3 One passthrough:** `688ab9d`.
 
-**Demo-ready (unchanged):** Acts **1–3** via SSE `/api/analyze` → Approve → One GitHub issue. **Workflow** is a **separate** button/API; does **not** replace Investigate and does **not** create GitHub issues.
+**Demo-ready:** Acts **1–3** via SSE `/api/analyze/stream` → human **Approve** → One → GitHub issue. **Run as Render Workflow** is a **separate** path; it does **not** replace Investigate and does **not** create GitHub issues.
 
 ### Implemented and working
 
@@ -21,22 +21,25 @@ Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hacka
 | **Web service on Render** | Live | `/health` 200; You.com MCP live; Parasail configured |
 | **Act 1 — Live Status** | Working | Observer + read-only bridge; SSE `/api/analyze/stream` |
 | **Act 2 — Investigate** | Working | You.com research + citations; Parasail security + arbitrator; operator answer sanitized |
-| **Human approval + Act 3 One → GitHub** | Working | `688ab9d` (`x-one-action-id`); issues [#1–#4](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues) from demo |
+| **Human approval + Act 3 One → GitHub** | Working | `688ab9d` (`x-one-action-id`); `88173af` (Approve button visible text); issues [#1–#4](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues) from demo |
 | **Session / SSE pipeline** | Unchanged | `/api/analyze` and stream **not** modified by workflow work |
 | **Render Workflow service (Dashboard)** | Deployed | Resource `ralphiia-liveops-investigation`; `python -m workflow.investigation` |
-| **Workflow code (repo `0f575a3`)** | Real agent chain | `app/workflow_runner.py`: `run_observer` → `run_research` → `run_security_reviewer` → `run_arbitrator` (`run_mode=investigate`). Used by `/api/render-workflow/*` (in-process) and `workflow/investigation.py` on the workflow service |
-| **Workflow remote trigger (optional)** | Implemented in code | If web env has `RENDER_API_KEY` + `RENDER_WORKFLOW_TASK_SLUG`, `POST https://api.render.com/v1/task-runs` + poll. **Else:** in-process only (same agents, ~1–2 min with live You.com) |
+| **Workflow — real agent chain (default)** | Working in-process | `0f575a3` `app/workflow_runner.py`: observer → research (You.com) → security → arbitrator (`run_mode=investigate`). Web `POST /api/render-workflow/start` runs this **inside the web service** unless remote env is set (~30 s–2 min, real step summaries, **not** stub notes) |
+| **Workflow UI** | Working | `c92e143` long poll + `liveops_pipeline` engine label; `02af7aa` full **verdict panel** after workflow completes (same area as SSE Investigate) |
+| **Workflow remote trigger (optional)** | Implemented | Web env: `RENDER_API_KEY` + `RENDER_WORKFLOW_TASK_SLUG` → Render `POST /v1/task-runs` + poll. **Default:** in-process only (richer UX: `agent_steps` in poll). Remote path without in-process steps is **thinner** (status/result only) |
+| **Live API trace log** | Working | Clear **Clear log** button; trace auto-clears at start of Acts 1–2 stream and **Run as Render Workflow** |
 | **Tests** | Passing | `pytest tests/` — **34 passed** (2026-07-25 local) |
 
-### Render Workflow — how it works (after deploy of `0f575a3+`)
+### Render Workflow — how it works (commits `0f575a3` + `c92e143` + `02af7aa`)
 
-| Path | What runs | Creates GitHub issue? |
-|------|-----------|------------------------|
-| **UI → Run as Render Workflow** | `POST /api/render-workflow/start` → background task in **web service** runs `run_liveops_investigation` (unless remote env set) | **No** |
-| **Render Dashboard → run task** on `ralphiia-liveops-investigation` | `workflow/investigation.py` → same runner; env `LIVEOPS_WORKFLOW_PROMPT`, `LIVEOPS_WORKFLOW_SESSION_ID` | **No** |
-| **Act 3 UI** | One passthrough after Approve | **Yes** |
+| Path | What runs | GitHub issue? | UX notes |
+|------|-----------|---------------|----------|
+| **UI → Run as Render Workflow** (default) | In-process `run_liveops_investigation` on **web service** | **No** | Step trace + full verdict panel on complete |
+| **UI → Run as Render Workflow** (remote env set) | Render API task run on `ralphiia-liveops-investigation` | **No** | Poll may lack per-agent steps unless web merges them |
+| **Render Dashboard → run task** | `workflow/investigation.py` + same runner; env `LIVEOPS_WORKFLOW_PROMPT`, `LIVEOPS_WORKFLOW_SESSION_ID` | **No** | For ops/Dashboard demos |
+| **Act 3 UI** | One passthrough after Approve | **Yes** | Separate from workflow button |
 
-**Deploy note:** After Render redeploys the web service from this branch, workflow runs take **~30 s–2 min** and step summaries come from real agent steps (not `"stub — …"`). **Verified on Render** after `a9bc44b`: run `rw-2267ded449c5` — steps `gather_context` … `compose_incident` with live summaries (~27 s).
+**Deploy note:** If workflow finishes in ~1 s with `"stub — …"` step text, the web service has **not** picked up `0f575a3+`. After redeploy, expect **~30 s–2 min** and live agent summaries. Smoke example (post-`9b020f6`): run `rw-2267ded449c5` — steps `gather_context` … `compose_incident` (~27 s).
 
 ### Not complete / optional
 
@@ -44,6 +47,7 @@ Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hacka
 |------|--------|
 | **Remote workflow on Render** | Requires `RENDER_API_KEY` + `RENDER_WORKFLOW_TASK_SLUG` on **web** service (slug from Dashboard, e.g. `ralphiia-liveops-investigation/run_liveops_investigation`) |
 | **Workflow service env** | Copy `YOUCOM_*`, `PARASAIL_*`, `RALFIA_*` from web to workflow service for Dashboard/manual runs |
+| **Workflow → GitHub** | **Not implemented** — use Act 3 after SSE Investigate + Approve |
 | **Local Ollama from Render** | Unavailable (expected); workflow runner skips local analyst like SSE investigate path |
 | **Opsera** | Dev-only; not runtime |
 
@@ -200,7 +204,7 @@ Two Render resources:
 
 **Setup:** [docs/RENDER_WORKFLOW_SETUP.md](docs/RENDER_WORKFLOW_SETUP.md)
 
-**Verified:** `pytest tests/` 34 passed; production smoke after redeploy should show real step summaries (~1–2 min), not `"stub — …"` notes.
+**Verified:** `pytest tests/` 34 passed; workflow in-process on Render shows real agent steps (~1–2 min) and verdict panel (`02af7aa`); not a substitute for Act 3 GitHub create.
 
 ### Human approval checkpoint
 

@@ -231,6 +231,9 @@
     }
     .api-trace-box h3 { margin: 0; font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
     .trace-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; align-items: center; margin-bottom: .4rem; }
+    .trace-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-left: auto; }
+    .btn-clear-trace { font-size: .72rem; padding: .2rem .55rem; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+    .btn-clear-trace:hover { color: var(--text); border-color: var(--muted); }
     .run-proof { font-size: .72rem; color: var(--ok); font-family: "JetBrains Mono", monospace; max-width: 70%; text-align: right; }
     .api-trace {
       margin: 0; max-height: 148px; overflow-y: auto; font-family: "JetBrains Mono", monospace;
@@ -357,7 +360,10 @@
     <section class="api-trace-box" aria-live="polite">
       <div class="trace-head">
         <h3 data-i18n="traceTitle">Live API trace</h3>
-        <span id="runProof" class="run-proof"></span>
+        <div class="trace-actions">
+          <button type="button" class="btn-clear-trace" id="btnClearTrace" title="Clear trace log">Clear log</button>
+          <span id="runProof" class="run-proof"></span>
+        </div>
       </div>
       <div id="apiTrace" class="api-trace" data-i18n="traceEmpty">Send a question — each line is a real outbound call (or an explicit skip).</div>
     </section>
@@ -1007,6 +1013,7 @@
 
     async function runRenderWorkflow() {
       clearError();
+      clearTrace();
       btnRenderWorkflow.disabled = true;
       setProgress(15);
       appendTraceLine('WORKFLOW · start (same agents as Investigate; may take 1–2 min)', 't-req');
@@ -1387,6 +1394,7 @@
       document.addEventListener('liveops:lang', () => applyLangUI());
     }
 
+    document.getElementById('btnClearTrace').onclick = () => clearTrace();
     btnLiveStatus.onclick = () => runStream('status_only', false);
     btnInvestigate.onclick = () => runStream('investigate', false);
     btnRenderWorkflow.onclick = () => runRenderWorkflow();

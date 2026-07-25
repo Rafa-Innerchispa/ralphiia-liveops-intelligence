@@ -49,7 +49,8 @@
     .badge.track { border-color: rgba(129, 140, 248, .45); color: #c7d2fe; background: rgba(129, 140, 248, .12); }
     .badge.live { border-color: rgba(52, 211, 153, .4); color: #a7f3d0; }
     .badge.dry { border-color: rgba(251, 191, 36, .35); color: #fde68a; }
-    .actions { display: flex; flex-direction: column; align-items: flex-end; gap: .6rem; }
+    .actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .45rem; }
+    .actions .ghost { font-size: .78rem; padding: .4rem .65rem; border-radius: 8px; white-space: nowrap; }
     button {
       font-family: inherit; cursor: pointer; border: none; border-radius: 10px;
       padding: .7rem 1.25rem; font-weight: 600; font-size: .95rem;
@@ -336,8 +337,9 @@
           <button type="button" data-lang-active="en" id="langEn">EN</button>
           <button type="button" data-lang-active="es" id="langEs">ES</button>
         </div>
-        <button type="button" class="ghost" id="incidentBtn" data-i18n="loadIncidentBtn"></button>
-        <button type="button" class="ghost" id="probeBtn" data-i18n="probeBtn"></button>
+        <button type="button" class="ghost" id="btnClearAll" data-i18n="clearRunBtn" title="Clear trace, chat, and recommendation">Clear screen</button>
+        <button type="button" class="ghost" id="incidentBtn" data-i18n="loadIncidentBtn" title="Shortcut: run Investigate with suggested prompt">Load suggested incident</button>
+        <button type="button" class="ghost" id="probeBtn" data-i18n="probeBtn" title="Server API test only — not the full demo flow">Quick You.com probe</button>
       </div>
     </header>
 
@@ -361,7 +363,7 @@
       <div class="trace-head">
         <h3 data-i18n="traceTitle">Live API trace</h3>
         <div class="trace-actions">
-          <button type="button" class="btn-clear-trace" id="btnClearTrace" title="Clear trace log">Clear log</button>
+          <button type="button" class="btn-clear-trace" id="btnClearTrace" data-i18n="clearRunBtn" title="Clear trace, chat, and recommendation">Clear screen</button>
           <span id="runProof" class="run-proof"></span>
         </div>
       </div>
@@ -556,6 +558,47 @@
       apiTrace.innerHTML = '';
       apiTrace.textContent = t('traceEmpty');
       runProof.textContent = '';
+    }
+
+    function clearRunUi() {
+      clearTrace();
+      clearError();
+      setProgress(0);
+      chatLog.innerHTML = '';
+      humanApproved = false;
+      btnGitHubIncident.disabled = true;
+      btnGitHubIncident.title = t('ctaGitHubDisabled') || 'Approve the diagnostic first (step 2).';
+      verdictPanel.hidden = true;
+      const vs = document.getElementById('verdictSource');
+      if (vs) { vs.hidden = true; vs.textContent = ''; }
+      document.getElementById('operatorBrief').textContent = '';
+      document.getElementById('operatorTechnical').textContent = '';
+      document.getElementById('metricsRow').innerHTML = '';
+      document.getElementById('verdictAction').textContent = '';
+      document.getElementById('verdictAction').hidden = true;
+      document.getElementById('citationCards').innerHTML = '';
+      document.getElementById('finalJson').textContent = '';
+      document.getElementById('decisionMsg').textContent = '';
+      document.getElementById('decisionMsg').style.color = '';
+      document.getElementById('elapsedMeta').textContent = '';
+      agentsEl.innerHTML = '';
+      activityFeed.innerHTML = '<h2></h2><div class="feed-empty" id="feedEmpty"></div>';
+      refreshFeedHeading();
+      const fe = document.getElementById('feedEmpty');
+      if (fe) fe.textContent = t('feedEmpty');
+      const pipeNames = {
+        observer: t('pipeObserver'),
+        local_analyst: t('pipeLocal'),
+        research: t('pipeResearch'),
+        security_reviewer: t('pipeSecurity'),
+        arbitrator: t('pipeArbitrator'),
+        human: t('pipeHuman'),
+      };
+      pipelineRail.querySelectorAll('.pipe-step').forEach(el => {
+        el.classList.remove('active', 'done', 'fail', 'skip');
+        const sn = pipeNames[el.dataset.agent];
+        if (sn) el.querySelector('.state').textContent = sn;
+      });
     }
 
     function appendTraceLine(text, cls) {
@@ -945,7 +988,8 @@
     }
 
     function appendFlow(d) {
-      if (feedEmpty) feedEmpty.remove();
+      const fe = document.getElementById('feedEmpty');
+      if (fe) fe.remove();
       const item = document.createElement('div');
       const kind = d.kind || 'info';
       item.className = 'flow-item ' + (kind === 'request' ? 'req' : kind === 'response' ? 'res' : 'chk');
@@ -1012,8 +1056,7 @@
     }
 
     async function runRenderWorkflow() {
-      clearError();
-      clearTrace();
+      clearRunUi();
       btnRenderWorkflow.disabled = true;
       setProgress(15);
       appendTraceLine('WORKFLOW · start (same agents as Investigate; may take 1–2 min)', 't-req');
@@ -1186,10 +1229,9 @@
     }
 
     async function runStream(runMode, researchDeeper) {
-      clearError();
+      clearRunUi();
       streamFinished = false;
       setCtaBusy(true);
-      clearTrace();
       if (runMode === 'status_only' && !getPrompt().trim()) {
         promptInput.value = t('promptLiveStatus');
       }
@@ -1201,25 +1243,8 @@
       }
       lastUserPrompt = getPrompt();
       appendChat('You', lastUserPrompt, 'user');
-      agentsEl.innerHTML = '';
-      verdictPanel.hidden = true;
-      document.getElementById('citationCards').innerHTML = '';
-      activityFeed.innerHTML = '<h2></h2>';
-      refreshFeedHeading();
       setProgress(5);
       streamStepCount = 0;
-      const pipeNames = {
-        observer: t('pipeObserver'),
-        local_analyst: t('pipeLocal'),
-        research: t('pipeResearch'),
-        security_reviewer: t('pipeSecurity'),
-        arbitrator: t('pipeArbitrator'),
-        human: t('pipeHuman'),
-      };
-      pipelineRail.querySelectorAll('.pipe-step').forEach(el => {
-        el.classList.remove('active', 'done', 'fail', 'skip');
-        el.querySelector('.state').textContent = pipeNames[el.dataset.agent] || '';
-      });
 
       appendTraceLine('START · run_mode=' + (runMode || 'auto'), 't-req');
       setProgress(8);
@@ -1332,7 +1357,7 @@
     }
 
     async function quickProbe() {
-      clearError();
+      clearRunUi();
       document.getElementById('probeBtn').disabled = true;
       try {
         const r = await loFetch(BASE + '/api/youcom/probe').then(x => x.json());
@@ -1394,7 +1419,8 @@
       document.addEventListener('liveops:lang', () => applyLangUI());
     }
 
-    document.getElementById('btnClearTrace').onclick = () => clearTrace();
+    document.getElementById('btnClearTrace').onclick = () => clearRunUi();
+    document.getElementById('btnClearAll').onclick = () => clearRunUi();
     btnLiveStatus.onclick = () => runStream('status_only', false);
     btnInvestigate.onclick = () => runStream('investigate', false);
     btnRenderWorkflow.onclick = () => runRenderWorkflow();

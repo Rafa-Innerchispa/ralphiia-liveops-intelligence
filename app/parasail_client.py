@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
+import re
 from typing import Any
 
 import httpx
@@ -81,4 +81,13 @@ class ParasailClient:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            return {"raw": text[:2000]}
+            repaired = re.sub(
+                r'"risk_level"\s*:\s*(high|medium|low)\b',
+                lambda m: f'"risk_level": "{m.group(1).lower()}"',
+                text,
+                flags=re.IGNORECASE,
+            )
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                return {"raw": text[:2000]}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
+from app.answer_render import normalize_operator_answer
 from app.models import AgentName, AgentStep, Citation, SecurityVerdict
 from app.incident_run import (
     derive_incident_id,
@@ -746,6 +747,7 @@ async def run_arbitrator(
                 f"Reasons: {'; '.join(security.reasons)}\n\n"
                 f"{recommendation}"
             )
+        recommendation = normalize_operator_answer(recommendation)
         await _flow(
             emit,
             {

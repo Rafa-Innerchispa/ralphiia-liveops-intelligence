@@ -351,7 +351,7 @@ async def incident_preview(body: IncidentPreviewRequest | None = None) -> dict:
     return {
         "draft": draft,
         "one_configured": bool(settings.resolved_one_secret()),
-        "github_fallback": bool(settings.resolved_github_token()),
+        "one_github_connection_key_set": bool(settings.resolved_one_github_connection_key()),
         "repo": f"{settings.github_repo_owner}/{settings.github_repo_name}"
         if settings.github_repo_owner
         else None,
@@ -361,6 +361,16 @@ async def incident_preview(body: IncidentPreviewRequest | None = None) -> dict:
 @app.post("/api/incident/create")
 async def incident_create(body: IncidentCreateRequest) -> dict:
     result = _result_for_incident(body.session_id or _last_session_id)
+    if body.human_approval != "approved":
+        raise HTTPException(
+            400,
+            "human_approval must be 'approved' after operator Approve checkpoint.",
+        )
+    if result.human_decision != "approve":
+        raise HTTPException(
+            400,
+            "Click Approve first — records diagnostic approval only (dry-run).",
+        )
     settings = get_settings()
     draft = build_issue_draft(
         result,
@@ -378,8 +388,17 @@ async def incident_create(body: IncidentCreateRequest) -> dict:
 @app.post("/api/decision")
 async def human_decision(body: HumanDecisionRequest) -> dict:
     global _last_result, _last_prompt, _last_session_id
-    if _last_result is None:
-        raise HTTPException(400, "Run /api/analyze first")
+    sid = (body.session_id or _last_session_id or "").strip()
+    try:
+        result = _result_for_incident(sid or None)
+    except HTTPException:
+        if _last_result is None:
+            raise HTTPException(400, "Run /api/analyze first")
+        result = _last_result
+        sid = sid or result.session_id or _last_session_id
+    _last_result = result
+    if sid:
+        _last_session_id = sid
     if body.decision not in {"approve", "reject", "research_deeper"}:
         raise HTTPException(400, "Invalid decision")
     if body.decision == "research_deeper":
@@ -390,21 +409,29 @@ async def human_decision(body: HumanDecisionRequest) -> dict:
             "dry_run_checkpoint": True,
             "message": "Research deeper — re-running pipeline anchored to session question.",
             "reuse_prompt": _last_prompt,
-            "session_id": _last_session_id,
+            "session_id": sid,
             "research_deeper": True,
         }
-        _last_result.human_decision = body.decision
+        result.human_decision = body.decision
+        save_pipeline_result(sid or result.session_id, result.model_dump())
         return checkpoint
+    if body.decision == "approve":
+        message = (
+            "Diagnostic record approved (dry-run). You may create a GitHub incident via One."
+        )
+    else:
+        message = "Rejected — no GitHub incident should be created for this run."
     checkpoint = {
         "decision": body.decision,
         "note": body.note,
         "executed": False,
         "dry_run_checkpoint": True,
-        "message": (
-            "No production changes applied. Approve is audit-only until operator confirms."
-        ),
+        "message": message,
+        "human_approved": body.decision == "approve",
+        "session_id": sid or result.session_id,
     }
-    _last_result.human_decision = body.decision
+    result.human_decision = body.decision
+    save_pipeline_result(sid or result.session_id, result.model_dump())
     return checkpoint
 
 

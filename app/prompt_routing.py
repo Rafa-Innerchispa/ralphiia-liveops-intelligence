@@ -99,16 +99,7 @@ def prompt_for_run_mode(run_mode: str, user_prompt: str, observer_facts: list[st
     if run_mode == "status_only":
         return clean or STATUS_DEFAULT_PROMPT
     if run_mode == "investigate":
-        base = clean or INVESTIGATE_DEFAULT_PROMPT
-        observed = [
-            f
-            for f in observer_facts
-            if not f.startswith("DEMO_") and not f.startswith("FIXTURE")
-        ][:4]
-        ctx = " ".join(observed)[:400]
-        if ctx and ctx not in base:
-            return f"{base} Observed this run: {ctx}"
-        return base
+        return clean or INVESTIGATE_DEFAULT_PROMPT
     return user_prompt
 
 
@@ -120,6 +111,9 @@ def build_research_query(user_prompt: str, observer_facts: list[str]) -> str:
     return build_sanitized_research_query(user_prompt, observed, demo)
 
 
+from app.answer_render import normalize_operator_answer
+
+
 def build_operator_summary(
     prompt: str,
     recommendation: str,
@@ -129,4 +123,4 @@ def build_operator_summary(
     local_preview: str = "",
 ) -> str:
     """Operator-facing text; keep recommendation readable (no API dump prefix)."""
-    return recommendation
+    return normalize_operator_answer(recommendation)

@@ -22,6 +22,7 @@ from app.ops_brief import service_matrix_from_snapshot
 from app.config import Settings
 from app.incident_run import derive_incident_id, hypotheses_for_run
 from app.provenance import canonical_citations
+from app.answer_render import normalize_operator_answer
 from app.models import AgentName, AgentStep, Citation, FinalRecommendation, PipelineResult, SecurityVerdict
 
 HACKATHON_TRACK = "Multi-Agent Systems"
@@ -293,12 +294,13 @@ def _assemble_result(
     incident_id = observer.metadata.get("incident_id") or derive_incident_id(snap, matrix)
     local_hyps = local.hypotheses if local.status == "completed" else []
     cites = canonical_citations(research.citations if research.status != "skipped" else [])
+    clean_action = normalize_operator_answer(str(arbitrator.metadata.get("recommended_action") or ""))
     recommendation = FinalRecommendation(
         observed_facts=observer.metadata.get("observed_facts") or observer.facts,
         hypotheses=list(dict.fromkeys(local_hyps + research.hypotheses)),
         confidence=float(arbitrator.metadata.get("confidence", 0.5)),
         citations=cites,
-        recommended_action=arbitrator.metadata["recommended_action"],
+        recommended_action=clean_action,
         risk_level=arbitrator.metadata.get("risk_level", "medium"),
         requires_approval=True,
         dry_run=True,
@@ -391,7 +393,7 @@ async def run_pipeline(
         session_id,
         [observer, local, research, reviewer, arbitrator],
         time.perf_counter() - t0,
-        effective,
+        prompt,
     )
 
 
@@ -458,7 +460,7 @@ async def stream_pipeline(
             "plan",
             {
                 "correlation_id": cid,
-                "user_prompt": effective,
+                "user_prompt": prompt,
                 "web_research": web,
                 "run_mode": run_mode,
                 "incident_id": observer.metadata.get("incident_id")
@@ -508,7 +510,7 @@ async def stream_pipeline(
         yield pack("agent_done", {"step": arbitrator.model_dump()})
 
         result = _assemble_result(
-            settings, cid, session_id, steps, time.perf_counter() - t0, effective
+            settings, cid, session_id, steps, time.perf_counter() - t0, prompt
         )
         yield pack(
             "data_flow",
@@ -526,9 +528,8 @@ async def stream_pipeline(
         yield pack("complete", {"result": result_payload})
     except Exception as exc:
         if steps:
-            effective = prompt_for_run_mode(run_mode, prompt, steps[0].facts)
             result = _assemble_result(
-                settings, cid, session_id, steps, time.perf_counter() - t0, effective
+                settings, cid, session_id, steps, time.perf_counter() - t0, prompt
             )
             result_payload = result.model_dump()
             result_payload["error"] = str(exc)

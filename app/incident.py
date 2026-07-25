@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from app.answer_render import normalize_operator_answer
 from app.config import Settings
-from app.github_incident import create_issue as github_create_issue
 from app.models import PipelineResult
 from app.one_mcp import OneMcpClient
 
@@ -18,8 +18,9 @@ def build_issue_draft(
 ) -> dict[str, Any]:
     rec = result.recommendation
     ts = datetime.now(timezone.utc).isoformat()
+    summary = normalize_operator_answer(rec.recommended_action)
     title = title_override.strip() or (
-        f"[LiveOps DEMO] Evolution health down · node .5 · {result.correlation_id[:16]}"
+        f"[LiveOps] {result.incident_id} · {result.correlation_id[:16]}"
     )
     cite_lines = [
         f"- [{c.title}]({c.url})" for c in rec.citations[:12]
@@ -27,7 +28,7 @@ def build_issue_draft(
     hypo = rec.hypotheses[:8]
     facts = rec.observed_facts[:10]
     body = body_override.strip() or _issue_body_markdown(
-        incident_summary=rec.recommended_action,
+        incident_summary=summary,
         facts=facts,
         hypotheses=hypo,
         cite_lines=cite_lines,
@@ -125,20 +126,14 @@ async def create_github_incident(
     labels = list(draft.get("labels") or ["liveops-incident"])
 
     one = OneMcpClient(settings)
-    if one.configured():
-        try:
-            out = await one.create_github_issue(owner, repo, title, body, labels=labels)
-            if out.get("ok") and out.get("html_url"):
-                return out
-        except Exception as exc:
-            if not settings.resolved_github_token():
-                raise RuntimeError(f"One MCP failed and no GITHUB_TOKEN fallback: {exc}") from exc
-
-    token = settings.resolved_github_token()
-    if not token:
+    if not one.configured():
         raise ValueError(
-            "Set ONE_SECRET (One MCP) or GITHUB_TOKEN for issue creation"
+            "Set ONE_SECRET (One MCP). GitHub issues are created only via One, not GITHUB_TOKEN."
         )
-    return await github_create_issue(
-        owner, repo, title, body, token=token, labels=labels
-    )
+    out = await one.create_github_issue(owner, repo, title, body, labels=labels)
+    if not out.get("ok") or not out.get("html_url"):
+        raise RuntimeError(
+            "One MCP did not return a GitHub issue URL. "
+            f"Connect GitHub in One dashboard. Raw: {str(out)[:400]}"
+        )
+    return out

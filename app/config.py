@@ -31,10 +31,17 @@ class Settings(BaseSettings):
     github_repo_name: str = "ralphiia-liveops-intelligence"
     github_token: str = ""
     one_secret: str = ""
+    one_github_connection_key: str = ""
     deploy_surface: str = "local"  # local | render
 
     def resolved_one_secret(self) -> str:
         return os.getenv("ONE_SECRET", "") or self.one_secret
+
+    def resolved_one_github_connection_key(self) -> str:
+        return (
+            os.getenv("ONE_GITHUB_CONNECTION_KEY", "").strip()
+            or self.one_github_connection_key.strip()
+        )
 
     def resolved_github_token(self) -> str:
         return os.getenv("GITHUB_TOKEN", "") or self.github_token

@@ -519,6 +519,7 @@
     let streamStepCount = 0;
     let lastUserPrompt = '';
     let sessionId = localStorage.getItem('liveops_session') || '';
+    let humanApproved = false;
     if (!sessionId) {
       sessionId = 'sess-' + Math.random().toString(36).slice(2, 14);
       localStorage.setItem('liveops_session', sessionId);
@@ -776,9 +777,12 @@
 
     function renderVerdict(data) {
       verdictPanel.hidden = false;
+      humanApproved = false;
+      btnGitHubIncident.disabled = true;
+      btnGitHubIncident.title = 'Approve the diagnostic first (step 2).';
       const rec = data.recommendation;
-      document.getElementById('operatorBrief').textContent =
-        data.operator_summary || rec.recommended_action || '';
+      const brief = data.operator_summary || rec.recommended_action || '';
+      document.getElementById('operatorBrief').textContent = brief;
       const proof = (data.metrics || {}).api_proof || {};
       document.getElementById('operatorTechnical').textContent = [
         proof.ralfia,
@@ -787,7 +791,8 @@
         proof.parasail_security ? 'Security:' + proof.parasail_security : '',
         proof.parasail_arbitrator ? 'Arbitrator:' + proof.parasail_arbitrator : '',
       ].filter(Boolean).join(' · ') || data.youcom_mode || '';
-      document.getElementById('verdictAction').textContent = rec.recommended_action;
+      document.getElementById('verdictAction').textContent = '';
+      document.getElementById('verdictAction').hidden = true;
       const sec = rec.security || {};
       document.getElementById('decisionMsg').style.color = '';
       document.getElementById('decisionMsg').textContent = '';
@@ -797,7 +802,7 @@
         document.getElementById('decisionMsg').style.color = 'var(--warn)';
       } else if (sec.approved === true) {
         document.getElementById('decisionMsg').textContent =
-          'Read-only investigation approved. Restart/recover/delete remain blocked.';
+          'Read-only investigation approved. Use Approve below, then Create GitHub Incident (One). Restart/recover/delete remain blocked.';
         document.getElementById('decisionMsg').style.color = 'var(--ok)';
       }
       document.getElementById('finalJson').textContent = JSON.stringify({
@@ -830,10 +835,8 @@
         proof.parasail_arbitrator ? 'Arb:' + proof.parasail_arbitrator : '',
       ].filter(Boolean).join(' · ');
       renderCitationCards(rec.citations);
-      const chatAnswer = rec.recommended_action || data.operator_summary || '';
+      const chatAnswer = brief;
       appendChat('LiveOps', chatAnswer, 'ops');
-      document.getElementById('decisionMsg').textContent = '';
-      document.getElementById('decisionMsg').style.color = 'var(--muted)';
     }
 
     function appendFlow(d) {
@@ -986,8 +989,6 @@
         markHumanAwaiting();
         setProgress(100);
         streamFinished = true;
-        btnGitHubIncident.disabled = false;
-        btnGitHubIncident.title = '';
       }
     }
 
@@ -1092,6 +1093,10 @@
     }
 
     async function openIncidentPreview() {
+      if (!humanApproved) {
+        showError('Approve the diagnostic (button 2) before creating a GitHub incident.');
+        return;
+      }
       document.getElementById('issueCreateMsg').textContent = '';
       try {
         const r = await loFetch(BASE + '/api/incident/preview', {
@@ -1163,7 +1168,7 @@
       const res = await loFetch(BASE + '/api/decision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision, note: 'UI dry-run' })
+        body: JSON.stringify({ decision, note: 'UI dry-run', session_id: sessionId || undefined })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1173,6 +1178,15 @@
       }
       document.getElementById('decisionMsg').style.color = 'var(--ok)';
       document.getElementById('decisionMsg').textContent = data.message || JSON.stringify(data);
+      if (decision === 'approve' && data.human_approved) {
+        humanApproved = true;
+        btnGitHubIncident.disabled = false;
+        btnGitHubIncident.title = '';
+      }
+      if (decision === 'reject') {
+        humanApproved = false;
+        btnGitHubIncident.disabled = true;
+      }
     }
 
     promptInput.addEventListener('keydown', (ev) => {

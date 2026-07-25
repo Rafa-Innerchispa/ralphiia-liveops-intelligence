@@ -97,6 +97,7 @@ class IncidentCreateRequest(BaseModel):
 class HumanDecisionRequest(BaseModel):
     decision: str  # approve | reject | research_deeper
     note: str = ""
+    session_id: str | None = None
 
 
 class HealthResponse(BaseModel):

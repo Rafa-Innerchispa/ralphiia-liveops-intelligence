@@ -96,9 +96,13 @@ class OneMcpClient:
         }
         if labels:
             params["labels"] = labels
+        exec_args: dict[str, Any] = {"action_id": action_id, "params": params}
+        conn_key = self.settings.resolved_one_github_connection_key()
+        if conn_key:
+            exec_args["connection_key"] = conn_key
         executed = await self.call_tool(
             "execute_one_action",
-            {"action_id": action_id, "params": params},
+            exec_args,
         )
         raw = self._text_blocks(executed)
         parsed = _parse_issue_response(raw)

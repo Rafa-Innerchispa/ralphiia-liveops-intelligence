@@ -8,7 +8,9 @@ Evidence-first LiveOps for distributed ops teams: live read-only probes, web-bac
 
 ## Live hackathon status (verified on Render)
 
-Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hackathon/youcom-liveops-20260724`
+Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hackathon/youcom-liveops-20260724` · **Last verified:** 2026-07-25 UTC · **Deploy commit:** `688ab9d` (One Act 3 fix)
+
+**Demo-ready for submission:** Acts 1–3 on the web service (status → investigate → approve → GitHub issue). Optional Render Workflow button is a **separate, stubbed** path.
 
 ### Implemented and working
 
@@ -19,19 +21,21 @@ Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hacka
 | **Act 2 — Investigate** | Working | You.com research + citations; Parasail security + arbitrator; operator answer sanitized (no raw JSON) |
 | **Human approval** | Working | `/api/decision` + UI **Approve** gates **Create GitHub Incident** |
 | **Issue preview** | Working | `/api/incident/preview` editable title/body |
+| **Act 3 — GitHub issue via One** | **Working** | Fix `688ab9d`: One CLI-style passthrough with **`x-one-action-id`** (raw passthrough without it returned `secret_middleware_error`). **Automated smoke on Render:** `POST /api/analyze` (`status_only`) → Approve → `POST /api/incident/create` → **200** → [issue #1](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues/1) (smoke title; safe to close). |
 | **Session / SSE pipeline** | Working | `session_id`; in-process pipeline unchanged for `/api/analyze` |
 | **Render Workflow service** | Deployed | Separate Render resource `ralphiia-liveops-investigation`; start `python -m workflow.investigation` |
 | **Workflow UI (feature flag)** | Working | `LIVEOPS_RENDER_WORKFLOW=true` → button **Run as Render Workflow**; `/api/render-workflow/start` → `completed` (verified API) |
 | **Tests** | Passing | `pytest tests/` (includes answer render, One client, workflow lifecycle) |
 | **Documentation** | In repo | This README, `docs/RENDER_WORKFLOW_SETUP.md`, `docs/DEPLOY_RENDER.md`, `docs/BRIDGE.md` |
 
-### Not complete / known gaps
+### Not complete / not fully demo-tested
 
-| Area | Status | What is missing |
-|------|--------|-----------------|
-| **GitHub issue create via One** | **Blocked on One API** | `POST /api/incident/create` returns **502** with One **`secret_middleware_error` (HTTP 400)** on Render as of last automated check. Env vars `ONE_SECRET` and `ONE_GITHUB_CONNECTION_KEY` are set on the web service, but One rejects the request — typically **Production API key** must match a **`live::github::…`** connection (Sandbox key + live connection fails). Code path: `api.withone.ai/v1/passthrough/github/repos/{owner}/{repo}/issues` with `x-one-secret` / `x-one-connection-key` (not `mcp.withone.ai` OAuth). |
+| Area | Status | What is missing or untested |
+|------|--------|-----------------------------|
+| **Live UI walkthrough (judges)** | **Not re-run end-to-end in browser after `688ab9d`** | API smoke passed; you should still click **2 · Investigate** → **Approve** → **Create GitHub Incident** once on stage (full SSE + citations). |
 | **Render Workflow — remote trigger** | Not wired | UI workflow button runs **in-app** orchestration (`/api/render-workflow/*`), not Render’s Workflow API. `RENDER_API_KEY` (`rnd_…`) is **not** used in code yet. |
 | **Workflow task bodies** | Stubs | `workflow/investigation.py` tasks return placeholder JSON; full You.com/Parasail/bridge logic still lives in the main SSE pipeline. |
+| **WhatsApp notify on analyze** | Optional | Env present in some setups; not part of the core hackathon demo script. |
 | **Local Ollama from Render** | Expected unavailable | Local Analyst skipped or unavailable from cloud; not a deployment bug. |
 | **Opsera** | Dev-only artifact | Build review JSON for how the app was built in Cursor — **not** a runtime agent. |
 
@@ -110,8 +114,8 @@ Operator prompt
        │
        ▼ (after Approve)
 ┌──────────────┐     One REST API         ┌─────────────────────────┐
-│  One → GH    │ ─────────────────────► │ passthrough github/     │
-│  Issue       │                        │ repos/…/issues          │
+│  One → GH    │ ─────────────────────► │ passthrough + action id │
+│  Issue       │                        │ (CLI execute path)      │
 └──────────────┘                        └─────────────────────────┘
 
 Optional (feature flag): **Run as Render Workflow** → `/api/render-workflow/*` (same repo, separate Render Workflow service)
@@ -155,12 +159,11 @@ Render cannot reach private lab IPs directly. A **read-only HTTPS bridge** expos
 
 ### One → GitHub issue (Act 3)
 
-- **Server API (Render backend):** `POST https://api.withone.ai/v1/passthrough/github/repos/{owner}/{repo}/issues`
-- **Headers:** `x-one-secret` (`sk_live_…` **Production** key from [API keys](https://app.withone.ai/settings/api-keys)) and `x-one-connection-key` (`live::github::default::…` from One → Connections → GitHub)
-- **Not** `https://mcp.withone.ai/mcp` with Bearer — that URL is **OAuth-only** (Cursor); server keys get **401** there
-- **Environment match:** a `live::…` connection key requires a **Production** API key, not Sandbox (otherwise `secret_middleware_error` / 400)
-- **Repository:** `GITHUB_REPO_OWNER` + `GITHUB_REPO_NAME` (defaults: `Rafa-Innerchispa` / `ralphiia-liveops-intelligence`)
-- **Flow:** Investigate → **Approve** → **Create GitHub Incident** → edit preview → **Create** → response includes `via: one_api_passthrough` and `html_url`
+- **App flow (same as [One CLI](https://www.withone.ai/docs/cli) `actions execute`):** resolve GitHub “Create an Issue” action → `GET /v1/knowledge?_id=…` → `POST /v1/passthrough{action.path}` with path vars `owner` / `repo`
+- **Headers:** `x-one-secret`, `x-one-connection-key`, and **`x-one-action-id`** (required; omitting it caused `secret_middleware_error` before `688ab9d`)
+- **Not** `https://mcp.withone.ai/mcp` with Bearer — OAuth-only (Cursor); server keys use `https://api.withone.ai`
+- **Env:** `ONE_SECRET`, `ONE_GITHUB_CONNECTION_KEY`, `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`; optional override `ONE_GITHUB_CREATE_ISSUE_ACTION_ID`
+- **Flow:** Investigate (or Live Status) → **Approve** → **Create GitHub Incident** → **Create** → JSON includes `via: one_api_passthrough`, `one_action_id`, `html_url`
 - **No `GITHUB_TOKEN` fallback** in the production path (One only)
 
 ### Render Workflow (optional Act 2 path — does not replace SSE)
@@ -228,6 +231,7 @@ More detail: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) · [docs/ARCHITECTURE.md
 | `CF_ACCESS_CLIENT_SECRET` | Optional Cloudflare Access secret |
 | `ONE_SECRET` | One **Production** API key (`sk_live_…`) for passthrough API |
 | `ONE_GITHUB_CONNECTION_KEY` | One GitHub connection key (`live::github::…`) |
+| `ONE_GITHUB_CREATE_ISSUE_ACTION_ID` | Optional; default resolved via One action search |
 | `ONE_API_BASE` | Default `https://api.withone.ai` |
 | `LIVEOPS_RENDER_WORKFLOW` | `true` on **web** service to show workflow button |
 | `LIVEOPS_RENDER_WORKFLOW_SERVICE` | Workflow service name (default `ralphiia-liveops-investigation`) |

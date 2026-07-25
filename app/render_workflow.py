@@ -64,7 +64,11 @@ async def start_workflow_run(
         )
     run_id = f"rw-{uuid.uuid4().hex[:12]}"
     now = time.time()
-    engine = "render_workflow_remote" if _remote_workflow_configured(settings) else "render_workflow"
+    engine = (
+        "render_workflow_remote"
+        if _remote_workflow_configured(settings)
+        else "liveops_pipeline"
+    )
     record: dict[str, Any] = {
         "run_id": run_id,
         "session_id": session_id,

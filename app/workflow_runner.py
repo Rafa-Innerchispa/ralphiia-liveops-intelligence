@@ -76,11 +76,13 @@ async def run_liveops_investigation(
     arbitrator = await run_arbitrator(settings, observer, research, reviewer)
     await emit_step("compose_incident", arbitrator)
 
+    youcom_mode = research.metadata.get("youcom_research_mode", "unknown")
     return {
         "workflow": "ralphiia-liveops-investigation",
         "session_id": session_id,
         "prompt": user_prompt,
         "run_mode": run_mode,
+        "youcom_mode": youcom_mode,
         "dry_run": settings.dry_run,
         "steps": steps_out,
         "agent_steps": [s.model_dump() for s in agent_steps],

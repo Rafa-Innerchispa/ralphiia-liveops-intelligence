@@ -66,7 +66,7 @@ async def test_render_workflow_run_lifecycle(monkeypatch, patch_investigation_ag
         assert r1.status_code == 200
         run_id = r1.json()["run"]["run_id"]
         assert r1.json()["run"]["status"] == "queued"
-        assert r1.json()["run"]["engine"] == "render_workflow"
+        assert r1.json()["run"]["engine"] == "liveops_pipeline"
         r2 = None
         for _ in range(50):
             r2 = await client.get(f"/api/render-workflow/runs/{run_id}")

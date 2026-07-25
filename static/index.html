@@ -911,7 +911,8 @@
     async function runRenderWorkflow() {
       clearError();
       btnRenderWorkflow.disabled = true;
-      appendTraceLine('RENDER WORKFLOW · start (isolated from SSE /api/analyze)', 't-req');
+      setProgress(15);
+      appendTraceLine('WORKFLOW · start (same agents as Investigate; may take 1–2 min)', 't-req');
       try {
         const r = await loFetch(BASE + '/api/render-workflow/start', {
           method: 'POST',
@@ -924,22 +925,46 @@
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || 'workflow start failed');
         const runId = data.run.run_id;
-        appendTraceLine('RENDER WORKFLOW · queued · ' + runId, 't-plan');
+        const engine = data.run.engine || 'liveops_pipeline';
+        appendTraceLine('WORKFLOW · ' + engine + ' · ' + runId, 't-plan');
         let status = data.run.status;
-        for (let i = 0; i < 80; i++) {
-          await new Promise(res => setTimeout(res, 400));
+        let lastStepCount = 0;
+        for (let i = 0; i < 360; i++) {
+          await new Promise(res => setTimeout(res, 500));
           const st = await loFetch(BASE + '/api/render-workflow/runs/' + runId).then(x => x.json());
           if (!st.ok) break;
-          status = st.run.status;
-          appendTraceLine('RENDER WORKFLOW · ' + status, 't-res');
+          const run = st.run;
+          status = run.status;
+          const steps = run.steps || [];
+          if (steps.length > lastStepCount) {
+            const s = steps[steps.length - 1];
+            appendTraceLine('WORKFLOW · ' + (s.name || s.step) + ' · ' + (s.status || ''), 't-res');
+            lastStepCount = steps.length;
+            setProgress(Math.min(90, 20 + lastStepCount * 18));
+          }
+          if (status === 'running' && i % 8 === 0) {
+            appendTraceLine('WORKFLOW · running… (You.com research can be slow)', 't-plan');
+          }
           if (status === 'completed' || status === 'failed') {
-            if (status === 'failed') throw new Error(st.run.error || 'workflow failed');
-            appendChat('LiveOps', t('ctaRenderWorkflowBadge') + ' · ' + runId, 'ops');
+            if (status === 'failed') throw new Error(run.error || 'workflow failed');
+            const res = run.result || {};
+            const ym = res.youcom_mode || res.render_task_run ? 'remote' : '?';
+            appendTraceLine('WORKFLOW · completed · youcom_mode=' + ym, 't-res');
+            if (res.recommendation && res.recommendation.recommended_action) {
+              appendChat('LiveOps', String(res.recommendation.recommended_action).slice(0, 500), 'ops');
+            } else if (run.render_task_run_id) {
+              appendChat('LiveOps', t('ctaRenderWorkflowBadge') + ' · Render task ' + run.render_task_run_id, 'ops');
+            }
+            setProgress(100);
             break;
           }
         }
+        if (status !== 'completed' && status !== 'failed') {
+          showError('Workflow still running — check trace or refresh later.');
+        }
       } catch (e) {
         showError(String(e.message || e));
+        setProgress(0);
       }
       btnRenderWorkflow.disabled = false;
     }

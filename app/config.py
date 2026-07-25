@@ -38,7 +38,10 @@ class Settings(BaseSettings):
     deploy_surface: str = "local"  # local | render
 
     def resolved_one_secret(self) -> str:
-        return os.getenv("ONE_SECRET", "") or self.one_secret
+        raw = (os.getenv("ONE_SECRET", "") or self.one_secret).strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+            raw = raw[1:-1].strip()
+        return raw
 
     def resolved_one_github_connection_key(self) -> str:
         return (

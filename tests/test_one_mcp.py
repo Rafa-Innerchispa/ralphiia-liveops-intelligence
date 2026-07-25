@@ -38,5 +38,5 @@ async def test_create_issue_uses_passthrough_url(monkeypatch):
     out = await client.create_github_issue("o", "r", "t", "b", labels=["liveops-incident"])
     assert out["ok"] is True
     assert out["via"] == "one_api_passthrough"
-    assert captured["path"] == "repos/o/r/issues"
+    assert captured["path"] == "github/repos/o/r/issues"
     assert captured["connection_key"].startswith("live::github")

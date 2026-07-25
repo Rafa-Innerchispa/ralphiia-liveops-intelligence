@@ -100,6 +100,11 @@ class HumanDecisionRequest(BaseModel):
     session_id: str | None = None
 
 
+class RenderWorkflowStartRequest(BaseModel):
+    session_id: str | None = None
+    prompt: str = ""
+
+
 class HealthResponse(BaseModel):
     ok: bool
     service: str

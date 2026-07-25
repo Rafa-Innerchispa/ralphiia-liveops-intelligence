@@ -18,6 +18,7 @@ from app.models import (
     IncidentCreateRequest,
     IncidentPreviewRequest,
     PipelineResult,
+    RenderWorkflowStartRequest,
 )
 from app.incident import build_issue_draft, create_github_incident
 from app.notify import schedule_analysis_notify
@@ -40,6 +41,12 @@ from app.session_store import (
     save_pipeline_result,
 )
 from app.youcom_client import YouComClient
+from app.render_workflow import (
+    get_workflow_run,
+    start_workflow_run,
+    workflow_enabled,
+    workflow_service_name,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -221,6 +228,8 @@ async def deployment() -> dict:
     )
     info["github_token_configured"] = bool(settings.resolved_github_token())
     info["ngrok_fallback"] = settings.liveops_public_url
+    info["render_workflow_enabled"] = workflow_enabled(settings)
+    info["render_workflow_service"] = workflow_service_name(settings)
     return info
 
 
@@ -433,6 +442,32 @@ async def human_decision(body: HumanDecisionRequest) -> dict:
     result.human_decision = body.decision
     save_pipeline_result(sid or result.session_id, result.model_dump())
     return checkpoint
+
+
+@app.post("/api/render-workflow/start")
+async def render_workflow_start(body: RenderWorkflowStartRequest) -> dict:
+    """Isolated Act 2 path — does not call /api/analyze or stream_pipeline."""
+    settings = get_settings()
+    if not workflow_enabled(settings):
+        raise HTTPException(
+            503,
+            "Render Workflow disabled. Set LIVEOPS_RENDER_WORKFLOW=true on the web service.",
+        )
+    sid = (body.session_id or _last_session_id or "").strip()
+    prompt = normalize_prompt(body.prompt or _last_prompt or None)
+    try:
+        started = await start_workflow_run(settings, session_id=sid, prompt=prompt)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"ok": True, "run": started}
+
+
+@app.get("/api/render-workflow/runs/{run_id}")
+async def render_workflow_status(run_id: str) -> dict:
+    rec = await get_workflow_run(run_id)
+    if not rec:
+        raise HTTPException(404, "Unknown workflow run")
+    return {"ok": True, "run": rec}
 
 
 @app.get("/api/youcom/probe")

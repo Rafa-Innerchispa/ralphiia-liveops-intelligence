@@ -348,6 +348,7 @@
         <button type="button" class="primary" id="btnLiveStatus" data-i18n="ctaLiveStatus">1 · Check Live Status</button>
         <button type="button" class="secondary" id="btnInvestigate" data-i18n="ctaInvestigate">2 · Investigate with Live Sources</button>
         <button type="button" class="ghost-cta" id="btnGitHubIncident" data-i18n="ctaGitHub" disabled title="">3 · Create GitHub Incident</button>
+        <button type="button" class="ghost-cta" id="btnRenderWorkflow" data-i18n="ctaRenderWorkflow" hidden disabled title="">Run as Render Workflow</button>
       </div>
       <p class="cta-help" id="ctaHelp" data-i18n="ctaHelp" style="margin:.45rem 0 0;font-size:.78rem;color:var(--muted);line-height:1.4">Demo order: (1) live status → (2) web + Parasail → (3) GitHub after a run completes.</p>
       <div class="chat-log" id="chatLog"></div>
@@ -503,6 +504,7 @@
     const btnLiveStatus = document.getElementById('btnLiveStatus');
     const btnInvestigate = document.getElementById('btnInvestigate');
     const btnGitHubIncident = document.getElementById('btnGitHubIncident');
+    const btnRenderWorkflow = document.getElementById('btnRenderWorkflow');
     const incidentModal = document.getElementById('incidentModal');
     const errorBanner = document.getElementById('errorBanner');
     const progressFill = document.getElementById('progressFill');
@@ -896,6 +898,50 @@
       } catch (e) {
         showError(t('errBackend'));
       }
+      try {
+        const dep = await loFetch(BASE + '/api/deployment').then(r => r.json());
+        if (dep.render_workflow_enabled) {
+          btnRenderWorkflow.hidden = false;
+          btnRenderWorkflow.disabled = false;
+          btnRenderWorkflow.title = dep.render_workflow_service || '';
+        }
+      } catch (_) { /* optional */ }
+    }
+
+    async function runRenderWorkflow() {
+      clearError();
+      btnRenderWorkflow.disabled = true;
+      appendTraceLine('RENDER WORKFLOW · start (isolated from SSE /api/analyze)', 't-req');
+      try {
+        const r = await loFetch(BASE + '/api/render-workflow/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            prompt: getPrompt() || lastUserPrompt,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'workflow start failed');
+        const runId = data.run.run_id;
+        appendTraceLine('RENDER WORKFLOW · queued · ' + runId, 't-plan');
+        let status = data.run.status;
+        for (let i = 0; i < 80; i++) {
+          await new Promise(res => setTimeout(res, 400));
+          const st = await loFetch(BASE + '/api/render-workflow/runs/' + runId).then(x => x.json());
+          if (!st.ok) break;
+          status = st.run.status;
+          appendTraceLine('RENDER WORKFLOW · ' + status, 't-res');
+          if (status === 'completed' || status === 'failed') {
+            if (status === 'failed') throw new Error(st.run.error || 'workflow failed');
+            appendChat('LiveOps', t('ctaRenderWorkflowBadge') + ' · ' + runId, 'ops');
+            break;
+          }
+        }
+      } catch (e) {
+        showError(String(e.message || e));
+      }
+      btnRenderWorkflow.disabled = false;
     }
 
     function dispatchStreamEvent(event, data) {
@@ -1210,6 +1256,7 @@
 
     btnLiveStatus.onclick = () => runStream('status_only', false);
     btnInvestigate.onclick = () => runStream('investigate', false);
+    btnRenderWorkflow.onclick = () => runRenderWorkflow();
     btnGitHubIncident.onclick = () => openIncidentPreview();
     document.getElementById('issueCancelBtn').onclick = () => incidentModal.classList.remove('open');
     document.getElementById('issueCreateBtn').onclick = () => createIncidentFromPreview();

@@ -29,10 +29,10 @@ class OneMcpClient:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-One-Secret": self.secret,
+            "x-one-secret": self.secret,
         }
         if connection_key:
-            headers["X-One-Connection-Key"] = connection_key
+            headers["x-one-connection-key"] = connection_key
         return headers
 
     async def _passthrough(
@@ -77,7 +77,9 @@ class OneMcpClient:
             raise RuntimeError(
                 "Set ONE_GITHUB_CONNECTION_KEY (One → Connections → GitHub)."
             )
-        upstream = f"repos/{quote(owner, safe='')}/{quote(repo, safe='')}/issues"
+        upstream = (
+            f"github/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/issues"
+        )
         payload: dict[str, Any] = {"title": title, "body": body}
         if labels:
             payload["labels"] = labels

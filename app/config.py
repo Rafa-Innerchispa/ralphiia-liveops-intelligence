@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     one_secret: str = ""
     one_github_connection_key: str = ""
     one_api_base: str = "https://api.withone.ai"
+    liveops_render_workflow: bool = False
+    liveops_render_workflow_service: str = "ralphiia-liveops-investigation"
     deploy_surface: str = "local"  # local | render
 
     def resolved_one_secret(self) -> str:

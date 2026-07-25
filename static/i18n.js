@@ -14,6 +14,8 @@
       ctaLiveStatus: "1 · Check Live Status",
       ctaInvestigate: "2 · Investigate with Live Sources",
       ctaGitHub: "3 · Create GitHub Incident",
+      ctaRenderWorkflow: "Run as Render Workflow",
+      ctaRenderWorkflowBadge: "Orchestrated by Render Workflows",
       ctaHelp:
         "Demo order: (1) live status only — saves You.com credits. (2) web research + Parasail with citations. (3) opens after a run finishes — GitHub incident preview (needs ONE_SECRET or GITHUB_TOKEN on server).",
       ctaGitHubDisabled: "Complete step 1 or 2 first",
@@ -114,6 +116,8 @@
       ctaLiveStatus: "1 · Comprobar estado live",
       ctaInvestigate: "2 · Investigar con fuentes live",
       ctaGitHub: "3 · Crear incidente GitHub",
+      ctaRenderWorkflow: "Ejecutar como Render Workflow",
+      ctaRenderWorkflowBadge: "Orquestado por Render Workflows",
       ctaHelp:
         "Orden demo: (1) solo estado live — ahorra créditos You.com. (2) investigación web + Parasail con citas. (3) se habilita al terminar 1 o 2 — preview de issue GitHub (requiere ONE_SECRET o GITHUB_TOKEN en servidor).",
       ctaGitHubDisabled: "Completa el paso 1 o 2 primero",

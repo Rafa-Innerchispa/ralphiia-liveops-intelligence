@@ -36,7 +36,7 @@ Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hacka
 | **Render Dashboard → run task** on `ralphiia-liveops-investigation` | `workflow/investigation.py` → same runner; env `LIVEOPS_WORKFLOW_PROMPT`, `LIVEOPS_WORKFLOW_SESSION_ID` | **No** |
 | **Act 3 UI** | One passthrough after Approve | **Yes** |
 
-**Deploy note:** Until Render redeploys the web service from this branch, production may still show old **stub** step notes (~1 s `completed`). After redeploy, workflow runs take **~1–2 minutes** and step summaries come from real agent steps (not `"stub — …"`).
+**Deploy note:** After Render redeploys the web service from this branch, workflow runs take **~30 s–2 min** and step summaries come from real agent steps (not `"stub — …"`). **Verified on Render** after `a9bc44b`: run `rw-2267ded449c5` — steps `gather_context` … `compose_incident` with live summaries (~27 s).
 
 ### Not complete / optional
 

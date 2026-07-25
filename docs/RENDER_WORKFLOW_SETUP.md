@@ -1,40 +1,32 @@
-# Render Workflow (Act 2) — create manually after this code is deployed
+# Render Workflow (Act 2)
 
-Render Blueprints **cannot** create Workflows yet. Use **Dashboard → New → Workflow**.
-
-## Service name
-
-`ralphiia-liveops-investigation`
-
-## Repository settings
+Blueprint cannot create Workflows — use **Dashboard → New → Workflow** (service `ralphiia-liveops-investigation`).
 
 | Field | Value |
 |-------|--------|
-| **Root Directory** | *(repo root)* |
-| **Branch** | `hackathon/youcom-liveops-20260724` |
-| **Runtime** | Python 3 |
-| **Build Command** | `pip install -r requirements.txt` |
 | **Start Command** | `python -m workflow.investigation` |
+| **Build** | `pip install -r requirements.txt` |
 
-Set env **`RENDER_WORKFLOW_TASK`** per task definition in Render UI, or map each workflow step to:
+## Env — workflow service (`ralphiia-liveops-investigation`)
 
-- `gather_context`
-- `research_live_sources`
-- `security_review`
-- `compose_incident`
-- `run_liveops_investigation`
+Copy from web service (investigate chain needs these):
 
-Copy **`YOUCOM_API_KEY`**, **`PARASAIL_API_KEY`**, **`RALFIA_STATUS_URL`**, **`RALFIA_STATUS_TOKEN`** from the web service.
+- `YDC_API_KEY` or `YOUCOM_API_KEY`
+- `PARASAIL_API_KEY`
+- `RALFIA_STATUS_URL`, `RALFIA_STATUS_TOKEN` (or `LIVEOPS_BRIDGE_TOKEN`)
+- `LIVEOPS_DATA_MODE` (optional, default `auto`)
+- `RENDER_WORKFLOW_TASK=run_liveops_investigation` (CLI entry when not using Render task runner)
+- **`LIVEOPS_WORKFLOW_PROMPT`** — default prompt if task has no API input
+- **`LIVEOPS_WORKFLOW_SESSION_ID`** — optional session label
 
-## Web service feature flag (later)
+Task slug in Render UI: `run_liveops_investigation` (or step tasks: `gather_context`, …).
 
-When Workflow is live, set on **ralphiia-liveops-intelligence** web service:
+## Env — web service (`ralphiia-liveops-intelligence`)
 
 - `LIVEOPS_RENDER_WORKFLOW=true`
 - `LIVEOPS_RENDER_WORKFLOW_SERVICE=ralphiia-liveops-investigation`
+- **Optional remote trigger** (else in-process `/api/render-workflow/start`):
+  - `RENDER_API_KEY` (`rnd_…`)
+  - `RENDER_WORKFLOW_TASK_SLUG` e.g. `ralphiia-liveops-investigation/run_liveops_investigation`
 
-Until then, Act 2 stays **in-process SSE** (current behavior).
-
-## Badge
-
-UI shows **Orchestrated by Render Workflows** only when `metrics.render_workflow_run_id` is present (not yet wired).
+In-process runs use the same agents as `/api/analyze` investigate mode (`run_observer` → `run_research` → security → arbitrator), without touching the SSE route.

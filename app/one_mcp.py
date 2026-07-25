@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -10,63 +11,58 @@ from app.config import Settings
 
 
 class OneMcpClient:
-    """One hosted MCP — execute_one_action for GitHub (ONE_SECRET required)."""
+    """One REST API — GitHub issues via Passthrough (sk_live + connection key).
 
-    PROTOCOL = "2024-11-05"
-    MCP_URL = "https://mcp.withone.ai/mcp"
+    Note: https://mcp.withone.ai/mcp is OAuth-only (Cursor). Server keys use
+    https://api.withone.ai with header X-One-Secret per One API docs.
+    """
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.secret = settings.resolved_one_secret()
+        self.api_base = settings.resolved_one_api_base().rstrip("/")
 
     def configured(self) -> bool:
         return bool(self.secret)
 
-    def _headers(self) -> dict[str, str]:
-        return {
+    def _headers(self, connection_key: str | None = None) -> dict[str, str]:
+        headers = {
             "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "Authorization": f"Bearer {self.secret}",
+            "Accept": "application/json",
+            "X-One-Secret": self.secret,
         }
+        if connection_key:
+            headers["X-One-Connection-Key"] = connection_key
+        return headers
 
-    async def _rpc(self, method: str, params: dict | None = None) -> dict[str, Any]:
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": method,
-            "params": params or {},
-        }
+    async def _passthrough(
+        self,
+        method: str,
+        upstream_path: str,
+        *,
+        connection_key: str,
+        json_body: dict | None = None,
+    ) -> Any:
+        path = upstream_path.lstrip("/")
+        url = f"{self.api_base}/v1/passthrough/{path}"
         async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(self.MCP_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
-            data = resp.json()
-        if "error" in data:
-            raise RuntimeError(data["error"])
-        return data.get("result") or {}
-
-    async def initialize(self) -> dict[str, Any]:
-        return await self._rpc(
-            "initialize",
-            {
-                "protocolVersion": self.PROTOCOL,
-                "capabilities": {},
-                "clientInfo": {"name": "ralphiia-liveops", "version": "0.3.0"},
-            },
-        )
-
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        await self.initialize()
-        return await self._rpc(
-            "tools/call", {"name": name, "arguments": arguments}
-        )
-
-    @staticmethod
-    def _text_blocks(result: dict[str, Any]) -> str:
-        parts: list[str] = []
-        for block in result.get("content") or []:
-            if isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text") or ""))
-        return "\n".join(parts)
+            resp = await client.request(
+                method.upper(),
+                url,
+                headers=self._headers(connection_key),
+                json=json_body,
+            )
+        if resp.status_code >= 400:
+            detail = resp.text[:500]
+            raise RuntimeError(
+                f"One passthrough HTTP {resp.status_code}: {detail}"
+            )
+        if not resp.content:
+            return {}
+        try:
+            return resp.json()
+        except json.JSONDecodeError:
+            return {"raw_text": resp.text[:4000]}
 
     async def create_github_issue(
         self,
@@ -76,71 +72,42 @@ class OneMcpClient:
         body: str,
         labels: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Search GitHub create-issue action and execute via One."""
-        search = await self.call_tool(
-            "search_one_platform_actions",
-            {"platform": "github", "query": "create issue repository"},
-        )
-        search_text = self._text_blocks(search)
-        action_id = _extract_action_id(search_text)
-        if not action_id:
-            raise RuntimeError(
-                "One: could not resolve GitHub create-issue action. "
-                "Connect GitHub in One dashboard."
-            )
-        params: dict[str, Any] = {
-            "owner": owner,
-            "repo": repo,
-            "title": title,
-            "body": body,
-        }
-        if labels:
-            params["labels"] = labels
-        exec_args: dict[str, Any] = {"action_id": action_id, "params": params}
         conn_key = self.settings.resolved_one_github_connection_key()
-        if conn_key:
-            exec_args["connection_key"] = conn_key
-        executed = await self.call_tool(
-            "execute_one_action",
-            exec_args,
+        if not conn_key:
+            raise RuntimeError(
+                "Set ONE_GITHUB_CONNECTION_KEY (One → Connections → GitHub)."
+            )
+        upstream = f"repos/{quote(owner, safe='')}/{quote(repo, safe='')}/issues"
+        payload: dict[str, Any] = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = labels
+        data = await self._passthrough(
+            "POST",
+            upstream,
+            connection_key=conn_key,
+            json_body=payload,
         )
-        raw = self._text_blocks(executed)
-        parsed = _parse_issue_response(raw)
-        parsed["via"] = "one_mcp"
-        parsed["action_id"] = action_id
+        parsed = _parse_issue_response(data if isinstance(data, dict) else {"raw": data})
+        parsed["via"] = "one_api_passthrough"
+        parsed["upstream_path"] = upstream
         return parsed
 
 
-def _extract_action_id(text: str) -> str | None:
-    for pattern in (
-        r'"action_id"\s*:\s*"([^"]+)"',
-        r"action_id[:=]\s*([A-Za-z0-9_\-:]+)",
-        r"conn_mod_def:[A-Za-z0-9_\-:]+",
-    ):
-        m = re.search(pattern, text)
-        if m:
-            return m.group(1) if m.lastindex else m.group(0)
-    return None
-
-
-def _parse_issue_response(text: str) -> dict[str, Any]:
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return {
-                "ok": True,
-                "number": data.get("number"),
-                "html_url": data.get("html_url") or data.get("url"),
-                "id": data.get("id"),
-                "raw": data,
-            }
-    except json.JSONDecodeError:
-        pass
-    url_m = re.search(r"https://github\.com/[^\s\"']+/issues/\d+", text)
-    num_m = re.search(r'"number"\s*:\s*(\d+)', text)
+def _parse_issue_response(data: dict[str, Any]) -> dict[str, Any]:
+    if data.get("html_url") or data.get("number"):
+        return {
+            "ok": True,
+            "number": data.get("number"),
+            "html_url": data.get("html_url") or data.get("url"),
+            "id": data.get("id"),
+            "raw": data,
+        }
+    raw = json.dumps(data) if isinstance(data, dict) else str(data)
+    url_m = re.search(r"https://github\.com/[^\s\"']+/issues/\d+", raw)
+    num_m = re.search(r'"number"\s*:\s*(\d+)', raw)
     return {
-        "ok": bool(url_m),
-        "number": int(num_m.group(1)) if num_m else None,
-        "html_url": url_m.group(0) if url_m else None,
-        "raw_text": text[:2000],
+        "ok": bool(url_m or data.get("number")),
+        "number": int(num_m.group(1)) if num_m else data.get("number"),
+        "html_url": url_m.group(0) if url_m else data.get("html_url"),
+        "raw_text": raw[:2000],
     }

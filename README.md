@@ -111,9 +111,8 @@ Render cannot reach private lab IPs directly. A **read-only HTTPS bridge** expos
 
 ### One MCP → GitHub issue (Act 3)
 
-- **Endpoint:** `https://mcp.withone.ai/mcp`
-- **Server secret:** `ONE_SECRET` (Bearer — **server** credential from [One dashboard](https://app.withone.ai), not Cursor OAuth alone)
-- **GitHub connection:** `ONE_GITHUB_CONNECTION_KEY` (from One → Connections → GitHub, format `live::github::default::…`)
+- **Server API:** `https://api.withone.ai/v1/passthrough/...` with headers **`X-One-Secret`** (`sk_live_…` from [API keys](https://app.withone.ai/settings/api-keys)) and **`X-One-Connection-Key`**
+- **Not** the remote MCP URL `https://mcp.withone.ai/mcp` — that endpoint is **OAuth-only** (Cursor/ChatGPT), so `sk_live` keys always return **401** there
 - **Repository:** `GITHUB_REPO_OWNER` + `GITHUB_REPO_NAME` (defaults in code: `Rafa-Innerchispa` / `ralphiia-liveops-intelligence`)
 - **Flow:** Run Investigate → **Approve** (records checkpoint) → **Create GitHub Incident** → edit preview → **Create** → real `html_url` with `via: one_mcp`
 - **No silent PAT fallback** in production path: issues are created through One only

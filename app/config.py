@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     github_token: str = ""
     one_secret: str = ""
     one_github_connection_key: str = ""
+    one_api_base: str = "https://api.withone.ai"
     deploy_surface: str = "local"  # local | render
 
     def resolved_one_secret(self) -> str:
@@ -41,6 +42,13 @@ class Settings(BaseSettings):
         return (
             os.getenv("ONE_GITHUB_CONNECTION_KEY", "").strip()
             or self.one_github_connection_key.strip()
+        )
+
+    def resolved_one_api_base(self) -> str:
+        return (
+            os.getenv("ONE_API_BASE", "").strip()
+            or getattr(self, "one_api_base", "").strip()
+            or "https://api.withone.ai"
         )
 
     def resolved_github_token(self) -> str:

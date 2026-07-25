@@ -8,9 +8,11 @@ Evidence-first LiveOps for distributed ops teams: live read-only probes, web-bac
 
 ## Live hackathon status (verified on Render)
 
-Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hackathon/youcom-liveops-20260724` · **Last verified:** 2026-07-25 UTC · **Deploy commit:** `688ab9d` (One Act 3 fix)
+Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hackathon/youcom-liveops-20260724` · **Repo commit:** `0f575a3` (workflow real) · **Last verified:** 2026-07-25 UTC
 
-**Demo-ready for submission:** Acts 1–3 on the web service (status → investigate → approve → GitHub issue). Optional Render Workflow button is a **separate, stubbed** path.
+**Honest audit:** [Issue #5](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues/5) (historical). **Workflow details:** this README + commit `0f575a3`.
+
+**Demo-ready (unchanged):** Acts **1–3** via SSE `/api/analyze` → Approve → One GitHub issue. **Workflow** is a **separate** button/API; does **not** replace Investigate and does **not** create GitHub issues.
 
 ### Implemented and working
 
@@ -18,26 +20,32 @@ Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hacka
 |------|--------|----------|
 | **Web service on Render** | Live | `/health` 200; You.com MCP live; Parasail configured |
 | **Act 1 — Live Status** | Working | Observer + read-only bridge; SSE `/api/analyze/stream` |
-| **Act 2 — Investigate** | Working | You.com research + citations; Parasail security + arbitrator; operator answer sanitized (no raw JSON) |
-| **Human approval** | Working | `/api/decision` + UI **Approve** gates **Create GitHub Incident** |
-| **Issue preview** | Working | `/api/incident/preview` editable title/body |
-| **Act 3 — GitHub issue via One** | **Working** | Fix `688ab9d`: One CLI-style passthrough with **`x-one-action-id`** (raw passthrough without it returned `secret_middleware_error`). **Automated smoke on Render:** `POST /api/analyze` (`status_only`) → Approve → `POST /api/incident/create` → **200** → [issue #1](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues/1) (smoke title; safe to close). |
-| **Session / SSE pipeline** | Working | `session_id`; in-process pipeline unchanged for `/api/analyze` |
-| **Render Workflow service** | Deployed | Separate Render resource `ralphiia-liveops-investigation`; start `python -m workflow.investigation` |
-| **Workflow UI (feature flag)** | Working | `LIVEOPS_RENDER_WORKFLOW=true` → button **Run as Render Workflow**; `/api/render-workflow/start` → `completed` (verified API) |
-| **Tests** | Passing | `pytest tests/` (includes answer render, One client, workflow lifecycle) |
-| **Documentation** | In repo | This README, `docs/RENDER_WORKFLOW_SETUP.md`, `docs/DEPLOY_RENDER.md`, `docs/BRIDGE.md` |
+| **Act 2 — Investigate** | Working | You.com research + citations; Parasail security + arbitrator; operator answer sanitized |
+| **Human approval + Act 3 One → GitHub** | Working | `688ab9d` (`x-one-action-id`); issues [#1–#4](https://github.com/Rafa-Innerchispa/ralphiia-liveops-intelligence/issues) from demo |
+| **Session / SSE pipeline** | Unchanged | `/api/analyze` and stream **not** modified by workflow work |
+| **Render Workflow service (Dashboard)** | Deployed | Resource `ralphiia-liveops-investigation`; `python -m workflow.investigation` |
+| **Workflow code (repo `0f575a3`)** | Real agent chain | `app/workflow_runner.py`: `run_observer` → `run_research` → `run_security_reviewer` → `run_arbitrator` (`run_mode=investigate`). Used by `/api/render-workflow/*` (in-process) and `workflow/investigation.py` on the workflow service |
+| **Workflow remote trigger (optional)** | Implemented in code | If web env has `RENDER_API_KEY` + `RENDER_WORKFLOW_TASK_SLUG`, `POST https://api.render.com/v1/task-runs` + poll. **Else:** in-process only (same agents, ~1–2 min with live You.com) |
+| **Tests** | Passing | `pytest tests/` — **34 passed** (2026-07-25 local) |
 
-### Not complete / not fully demo-tested
+### Render Workflow — how it works (after deploy of `0f575a3+`)
 
-| Area | Status | What is missing or untested |
-|------|--------|-----------------------------|
-| **Live UI walkthrough (judges)** | **Not re-run end-to-end in browser after `688ab9d`** | API smoke passed; you should still click **2 · Investigate** → **Approve** → **Create GitHub Incident** once on stage (full SSE + citations). |
-| **Render Workflow — remote trigger** | Not wired | UI workflow button runs **in-app** orchestration (`/api/render-workflow/*`), not Render’s Workflow API. `RENDER_API_KEY` (`rnd_…`) is **not** used in code yet. |
-| **Workflow task bodies** | Stubs | `workflow/investigation.py` tasks return placeholder JSON; full You.com/Parasail/bridge logic still lives in the main SSE pipeline. |
-| **WhatsApp notify on analyze** | Optional | Env present in some setups; not part of the core hackathon demo script. |
-| **Local Ollama from Render** | Expected unavailable | Local Analyst skipped or unavailable from cloud; not a deployment bug. |
-| **Opsera** | Dev-only artifact | Build review JSON for how the app was built in Cursor — **not** a runtime agent. |
+| Path | What runs | Creates GitHub issue? |
+|------|-----------|------------------------|
+| **UI → Run as Render Workflow** | `POST /api/render-workflow/start` → background task in **web service** runs `run_liveops_investigation` (unless remote env set) | **No** |
+| **Render Dashboard → run task** on `ralphiia-liveops-investigation` | `workflow/investigation.py` → same runner; env `LIVEOPS_WORKFLOW_PROMPT`, `LIVEOPS_WORKFLOW_SESSION_ID` | **No** |
+| **Act 3 UI** | One passthrough after Approve | **Yes** |
+
+**Deploy note:** Until Render redeploys the web service from this branch, production may still show old **stub** step notes (~1 s `completed`). After redeploy, workflow runs take **~1–2 minutes** and step summaries come from real agent steps (not `"stub — …"`).
+
+### Not complete / optional
+
+| Area | Status |
+|------|--------|
+| **Remote workflow on Render** | Requires `RENDER_API_KEY` + `RENDER_WORKFLOW_TASK_SLUG` on **web** service (slug from Dashboard, e.g. `ralphiia-liveops-investigation/run_liveops_investigation`) |
+| **Workflow service env** | Copy `YOUCOM_*`, `PARASAIL_*`, `RALFIA_*` from web to workflow service for Dashboard/manual runs |
+| **Local Ollama from Render** | Unavailable (expected); workflow runner skips local analyst like SSE investigate path |
+| **Opsera** | Dev-only; not runtime |
 
 ### Environment variables (web service `ralphiia-liveops-intelligence`)
 
@@ -47,7 +55,9 @@ For Act 3 (issue create): `ONE_SECRET`, `ONE_GITHUB_CONNECTION_KEY`, `GITHUB_REP
 
 For workflow button: `LIVEOPS_RENDER_WORKFLOW=true`, `LIVEOPS_RENDER_WORKFLOW_SERVICE=ralphiia-liveops-investigation`.
 
-`RENDER_API_KEY` is for future Render API integration — **does not** replace `ONE_SECRET`.
+Optional **remote** workflow trigger on web service: `RENDER_API_KEY`, `RENDER_WORKFLOW_TASK_SLUG` (see [docs/RENDER_WORKFLOW_SETUP.md](docs/RENDER_WORKFLOW_SETUP.md)).
+
+`RENDER_API_KEY` does **not** replace `ONE_SECRET`.
 
 ---
 | | |
@@ -166,23 +176,31 @@ Render cannot reach private lab IPs directly. A **read-only HTTPS bridge** expos
 - **Flow:** Investigate (or Live Status) → **Approve** → **Create GitHub Incident** → **Create** → JSON includes `via: one_api_passthrough`, `one_action_id`, `html_url`
 - **No `GITHUB_TOKEN` fallback** in the production path (One only)
 
-### Render Workflow (optional Act 2 path — does not replace SSE)
+### Render Workflow (optional — separate from SSE Acts 1–2)
 
-Two separate Render resources:
+Two Render resources:
 
 | Resource | Name | Start command |
 |----------|------|----------------|
 | **Web Service** | `ralphiia-liveops-intelligence` | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | **Workflow** | `ralphiia-liveops-investigation` | `python -m workflow.investigation` |
 
-- **Entry file:** `workflow/investigation.py` (tasks: `gather_context`, `research_live_sources`, `security_review`, `compose_incident`, `run_liveops_investigation`)
-- **Workflow env:** `RENDER_WORKFLOW_TASK=run_liveops_investigation` (or per-step task name); copy `YDC_API_KEY`, `PARASAIL_API_KEY`, `RALFIA_STATUS_*` when wiring real logic (current tasks are **stubs** that return JSON)
-- **Web env (shows UI button):** `LIVEOPS_RENDER_WORKFLOW=true`, `LIVEOPS_RENDER_WORKFLOW_SERVICE=ralphiia-liveops-investigation`
-- **UI:** button **Run as Render Workflow** — calls **`/api/render-workflow/*` only**; **`/api/analyze` and SSE are unchanged**
-- **Statuses:** `queued` → `running` → `completed` | `failed`
-- **Setup:** [docs/RENDER_WORKFLOW_SETUP.md](docs/RENDER_WORKFLOW_SETUP.md) (Workflow must be created in Dashboard → New → Workflow; Blueprint only defines the web service)
+**Shared runner (`0f575a3`):** `app/workflow_runner.py` — same investigate agents as the main pipeline (without SSE / without local Ollama).
 
-**Verified on Render:** `GET /api/deployment` → `render_workflow_enabled: true`; `POST /api/render-workflow/start` → run completes with `status: completed`.
+| Component | Role |
+|-----------|------|
+| `POST /api/render-workflow/start` | Queues run in web service; default **in-process** `run_liveops_investigation` |
+| `GET /api/render-workflow/runs/{id}` | Poll `queued` → `running` → `completed` \| `failed` |
+| `workflow/investigation.py` | Entry when Render runs the workflow service (`RENDER_WORKFLOW_TASK`, env prompt/session) |
+| Remote mode | Web env: `RENDER_API_KEY` + `RENDER_WORKFLOW_TASK_SLUG` → Render API `POST /v1/task-runs` |
+
+**Web env:** `LIVEOPS_RENDER_WORKFLOW=true`, `LIVEOPS_RENDER_WORKFLOW_SERVICE=ralphiia-liveops-investigation`.
+
+**Does not:** call `/api/analyze`, create GitHub issues, or replace **Investigate** for the hackathon pitch.
+
+**Setup:** [docs/RENDER_WORKFLOW_SETUP.md](docs/RENDER_WORKFLOW_SETUP.md)
+
+**Verified:** `pytest tests/` 34 passed; production smoke after redeploy should show real step summaries (~1–2 min), not `"stub — …"` notes.
 
 ### Human approval checkpoint
 
@@ -235,6 +253,10 @@ More detail: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) · [docs/ARCHITECTURE.md
 | `ONE_API_BASE` | Default `https://api.withone.ai` |
 | `LIVEOPS_RENDER_WORKFLOW` | `true` on **web** service to show workflow button |
 | `LIVEOPS_RENDER_WORKFLOW_SERVICE` | Workflow service name (default `ralphiia-liveops-investigation`) |
+| `RENDER_API_KEY` | Optional on **web** service — Render API key to trigger remote task runs |
+| `RENDER_WORKFLOW_TASK_SLUG` | Optional — e.g. `ralphiia-liveops-investigation/run_liveops_investigation` |
+| `LIVEOPS_WORKFLOW_PROMPT` | On **workflow** service — default prompt for `python -m workflow.investigation` |
+| `LIVEOPS_WORKFLOW_SESSION_ID` | On **workflow** service — optional session label |
 | `RENDER_WORKFLOW_TASK` | On **Workflow** service: task function name (default `run_liveops_investigation`) |
 | `GITHUB_REPO_OWNER` | GitHub org/user for issues |
 | `GITHUB_REPO_NAME` | Repository name for issues |

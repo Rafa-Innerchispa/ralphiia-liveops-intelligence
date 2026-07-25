@@ -74,6 +74,9 @@
       operatorSummary: "Operator summary",
       jsonSummary: "Structured JSON (judges)",
       approveBtn: "Approve",
+      workflowVerdictSource: "Source · Render Workflow",
+      workflowVerdictHint:
+        "Workflow finished (read-only). Approve below only if you will open a GitHub issue (Act 3). For GitHub, run Investigate (2) first so the issue body matches this session.",
       rejectBtn: "Reject",
       deeperBtn: "Research deeper",
       facts: "Observed facts",
@@ -176,6 +179,9 @@
       operatorSummary: "Resumen para operador",
       jsonSummary: "JSON estructurado (judges)",
       approveBtn: "Aprobar",
+      workflowVerdictSource: "Origen · Render Workflow",
+      workflowVerdictHint:
+        "Resultado del workflow (solo lectura). Pulsa Aprobar abajo solo si vas a abrir un issue en GitHub (Acto 3). Para GitHub, ejecuta Investigate (2) antes para que el cuerpo del issue coincida con esta sesión.",
       rejectBtn: "Reject",
       deeperBtn: "Research deeper",
       facts: "Hechos observados",

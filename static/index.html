@@ -410,6 +410,7 @@
 
     <section class="verdict" id="verdictPanel" hidden>
       <h2 data-i18n="verdictTitle"></h2>
+      <p id="verdictSource" hidden style="font-size:.8rem;color:#a5b4fc;margin:0 0 .5rem;font-weight:600"></p>
       <p class="human-checkpoint-hint" data-i18n="humanCheckpointHint" style="font-size:.82rem;color:var(--warn);margin:0 0 .75rem;line-height:1.45"></p>
       <div class="label" data-i18n="naturalAnswerLabel">Natural-language answer</div>
       <div class="operator-brief" id="operatorBrief"></div>
@@ -777,8 +778,104 @@
       return promptInput.value.trim();
     }
 
+    function wfStepByAgent(steps, agent) {
+      return (steps || []).find(s => s.agent === agent) || null;
+    }
+
+    function workflowDataSources(observer, research) {
+      const obs = observer || {};
+      const res = research || {};
+      const obsSrc = (obs.metadata || {}).source || 'unknown';
+      let obsLabel = String(obsSrc);
+      if (obsSrc === 'ralfia_health_readonly') obsLabel = 'Live · RalfIA :8101';
+      else if (obsSrc === 'ralfia_bridge_live') obsLabel = 'Live · RalfIA bridge';
+      else if (obsSrc === 'live_unavailable') obsLabel = 'Unavailable · live probe failed';
+      else if (String(obsSrc).includes('fixture')) obsLabel = 'Fallback fixture';
+      const resMode = (res.metadata || {}).youcom_research_mode || 'unknown';
+      let resLabel;
+      if (resMode === 'skipped_status_only') resLabel = 'Skipped (status-only prompt)';
+      else if (String(resMode).includes('fixture') || resMode === 'unknown') resLabel = 'You.com · ' + resMode;
+      else resLabel = 'You.com MCP · ' + resMode;
+      return {
+        observer: obsLabel,
+        research: resLabel,
+        local_analyst: 'Skipped (workflow — no local analyst in this path)',
+      };
+    }
+
+    function renderWorkflowVerdict(run) {
+      const res = run.result || {};
+      const agentSteps = res.agent_steps || [];
+      if (!agentSteps.length) {
+        if (run.render_task_run_id) {
+          appendChat(
+            'LiveOps',
+            t('ctaRenderWorkflowBadge') + ' · Render task ' + run.render_task_run_id + ' (no agent_steps in API result)',
+            'ops'
+          );
+        }
+        return;
+      }
+      const observer = wfStepByAgent(agentSteps, 'observer') || {};
+      const research = wfStepByAgent(agentSteps, 'research') || {};
+      const reviewer = wfStepByAgent(agentSteps, 'security_reviewer') || {};
+      const arbitrator = wfStepByAgent(agentSteps, 'arbitrator') || {};
+      const secRaw = (reviewer.metadata || {}).security || {
+        approved: reviewer.status !== 'rejected',
+        reasons: [],
+        blocked_actions: [],
+      };
+      const arbMeta = arbitrator.metadata || {};
+      const recTop = res.recommendation || {};
+      const cites = research.citations || [];
+      const recommended =
+        recTop.recommended_action || arbMeta.recommended_action || arbitrator.summary || '';
+      const elapsed =
+        run.updated_at && run.created_at
+          ? Math.round((run.updated_at - run.created_at) * 1000) / 1000
+          : null;
+      const ds = workflowDataSources(observer, research);
+      renderVerdict({
+        session_id: res.session_id || run.session_id,
+        youcom_mode: res.youcom_mode || (research.metadata || {}).youcom_research_mode || 'unknown',
+        operator_summary: recommended,
+        correlation_id: run.run_id,
+        metrics: {
+          citation_coverage: cites.length,
+          time_to_recommendation_sec: elapsed,
+          local_analyst_latency_ms: null,
+          api_proof: {
+            ralfia: ds.observer,
+            ollama: ds.local_analyst,
+            youcom: ds.research,
+            parasail_security: (reviewer.metadata || {}).parasail_mode,
+            parasail_arbitrator: arbMeta.parasail_mode,
+          },
+        },
+        recommendation: {
+          recommended_action: recommended,
+          confidence: recTop.confidence ?? arbMeta.confidence ?? 0.5,
+          risk_level: arbMeta.risk_level || 'medium',
+          citations: cites,
+          security: secRaw,
+          observed_facts: (observer.metadata || {}).observed_facts || observer.facts || [],
+          hypotheses: research.hypotheses || [],
+          requires_approval: true,
+        },
+      });
+      const srcEl = document.getElementById('verdictSource');
+      srcEl.hidden = false;
+      srcEl.textContent = 'Source: Render Workflow · ' + run.run_id;
+      document.getElementById('decisionMsg').style.color = 'var(--ok)';
+      document.getElementById('decisionMsg').textContent = t('workflowVerdictHint');
+      markHumanAwaiting();
+      verdictPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
     function renderVerdict(data) {
       verdictPanel.hidden = false;
+      document.getElementById('verdictSource').hidden = true;
+      document.getElementById('verdictSource').textContent = '';
       humanApproved = false;
       btnGitHubIncident.disabled = true;
       btnGitHubIncident.title = 'Approve the diagnostic first (step 2).';
@@ -950,11 +1047,7 @@
             const res = run.result || {};
             const ym = res.youcom_mode || res.render_task_run ? 'remote' : '?';
             appendTraceLine('WORKFLOW · completed · youcom_mode=' + ym, 't-res');
-            if (res.recommendation && res.recommendation.recommended_action) {
-              appendChat('LiveOps', String(res.recommendation.recommended_action).slice(0, 500), 'ops');
-            } else if (run.render_task_run_id) {
-              appendChat('LiveOps', t('ctaRenderWorkflowBadge') + ' · Render task ' + run.render_task_run_id, 'ops');
-            }
+            renderWorkflowVerdict(run);
             setProgress(100);
             break;
           }

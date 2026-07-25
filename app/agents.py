@@ -355,8 +355,8 @@ async def run_research(
             "kind": "request",
             "title": "Paso 2c · You.com Research (MCP)",
             "explain": (
-                "Informe largo con citas (`you-research`) — suele tardar 20–40 s; "
-                "aquí está el corazón del track Multi-Agent + You.com."
+                "Informe con citas (`you-research`) — normalmente 30–90 s en MCP; "
+                "si tarda más, el servidor hace fallback REST automático."
             ),
             "transport": "MCP you-research",
             "payload": {"query": query},

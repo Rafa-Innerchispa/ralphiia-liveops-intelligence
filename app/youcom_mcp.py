@@ -14,10 +14,15 @@ class YouComMcpClient:
     """You.com remote MCP (Streamable HTTP) — you-search, you-contents, you-research."""
 
     PROTOCOL = "2024-11-05"
+    _TIMEOUT_SEARCH = 35.0
+    _TIMEOUT_CONTENTS = 40.0
+    _TIMEOUT_RESEARCH = 50.0
+    _TIMEOUT_DEFAULT = 60.0
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.api_key = settings.resolved_youcom_key()
+        self._initialized = False
         if self.api_key:
             self.mcp_url = (
                 f"{settings.youcom_mcp_url}"
@@ -35,14 +40,17 @@ class YouComMcpClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    async def _rpc(self, method: str, params: dict | None = None) -> dict[str, Any]:
+    async def _rpc(
+        self, method: str, params: dict | None = None, *, timeout: float | None = None
+    ) -> dict[str, Any]:
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": method,
             "params": params or {},
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        t = timeout if timeout is not None else self._TIMEOUT_DEFAULT
+        async with httpx.AsyncClient(timeout=t) as client:
             resp = await client.post(
                 self.mcp_url, json=payload, headers=self._headers()
             )
@@ -52,20 +60,36 @@ class YouComMcpClient:
             raise RuntimeError(data["error"])
         return data.get("result") or {}
 
-    async def initialize(self) -> dict[str, Any]:
-        return await self._rpc(
+    async def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+        await self._rpc(
             "initialize",
             {
                 "protocolVersion": self.PROTOCOL,
                 "capabilities": {},
                 "clientInfo": {"name": "ralphiia-liveops", "version": "0.1.0"},
             },
+            timeout=self._TIMEOUT_DEFAULT,
         )
+        self._initialized = True
+
+    async def initialize(self) -> dict[str, Any]:
+        await self._ensure_initialized()
+        return {"ok": True}
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        await self.initialize()
+        await self._ensure_initialized()
+        if name == "you-research":
+            t = self._TIMEOUT_RESEARCH
+        elif name == "you-contents":
+            t = self._TIMEOUT_CONTENTS
+        elif name == "you-search":
+            t = self._TIMEOUT_SEARCH
+        else:
+            t = self._TIMEOUT_DEFAULT
         return await self._rpc(
-            "tools/call", {"name": name, "arguments": arguments}
+            "tools/call", {"name": name, "arguments": arguments}, timeout=t
         )
 
     @staticmethod

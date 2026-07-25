@@ -64,6 +64,15 @@ class YouComClient:
         if self._use_mcp():
             try:
                 return await self._mcp.research(query)
+            except (httpx.TimeoutException, TimeoutError) as exc:
+                if not self.api_key:
+                    return self._fixture_research(query)
+                report, cites, mode = await self._research_rest(query)
+                return (
+                    report,
+                    cites,
+                    f"rest_live_after_mcp_timeout ({exc.__class__.__name__})",
+                )
             except Exception:
                 if not self.api_key:
                     return self._fixture_research(query)
@@ -71,6 +80,9 @@ class YouComClient:
             return self._fixture_research(query)
         try:
             return await self._mcp.research(query)
+        except (httpx.TimeoutException, TimeoutError) as exc:
+            report, cites, mode = await self._research_rest(query)
+            return report, cites, f"rest_live_after_mcp_timeout ({exc.__class__.__name__})"
         except Exception:
             return await self._research_rest(query)
 

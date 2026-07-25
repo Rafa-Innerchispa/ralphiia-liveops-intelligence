@@ -2,8 +2,50 @@
 
 **Ask your infrastructure. Get evidence, not guesses.**
 
-Evidence-first LiveOps for distributed ops teams: live read-only probes, web-backed research with citations, independent security review, human approval, and optional incident tracking on GitHub via **One MCP** — **no production mutations** (`dry_run=true`).
+Evidence-first LiveOps for distributed ops teams: live read-only probes, web-backed research with citations, independent security review, human approval, and optional incident tracking on GitHub via **One passthrough API** — **no production mutations** (`dry_run=true`).
 
+---
+
+## Live hackathon status (verified on Render)
+
+Public URL: https://ralphiia-liveops-intelligence.onrender.com · Branch: `hackathon/youcom-liveops-20260724`
+
+### Implemented and working
+
+| Area | Status | Evidence |
+|------|--------|----------|
+| **Web service on Render** | Live | `/health` 200; You.com MCP live; Parasail configured |
+| **Act 1 — Live Status** | Working | Observer + read-only bridge; SSE `/api/analyze/stream` |
+| **Act 2 — Investigate** | Working | You.com research + citations; Parasail security + arbitrator; operator answer sanitized (no raw JSON) |
+| **Human approval** | Working | `/api/decision` + UI **Approve** gates **Create GitHub Incident** |
+| **Issue preview** | Working | `/api/incident/preview` editable title/body |
+| **Session / SSE pipeline** | Working | `session_id`; in-process pipeline unchanged for `/api/analyze` |
+| **Render Workflow service** | Deployed | Separate Render resource `ralphiia-liveops-investigation`; start `python -m workflow.investigation` |
+| **Workflow UI (feature flag)** | Working | `LIVEOPS_RENDER_WORKFLOW=true` → button **Run as Render Workflow**; `/api/render-workflow/start` → `completed` (verified API) |
+| **Tests** | Passing | `pytest tests/` (includes answer render, One client, workflow lifecycle) |
+| **Documentation** | In repo | This README, `docs/RENDER_WORKFLOW_SETUP.md`, `docs/DEPLOY_RENDER.md`, `docs/BRIDGE.md` |
+
+### Not complete / known gaps
+
+| Area | Status | What is missing |
+|------|--------|-----------------|
+| **GitHub issue create via One** | **Blocked on One API** | `POST /api/incident/create` returns **502** with One **`secret_middleware_error` (HTTP 400)** on Render as of last automated check. Env vars `ONE_SECRET` and `ONE_GITHUB_CONNECTION_KEY` are set on the web service, but One rejects the request — typically **Production API key** must match a **`live::github::…`** connection (Sandbox key + live connection fails). Code path: `api.withone.ai/v1/passthrough/github/repos/{owner}/{repo}/issues` with `x-one-secret` / `x-one-connection-key` (not `mcp.withone.ai` OAuth). |
+| **Render Workflow — remote trigger** | Not wired | UI workflow button runs **in-app** orchestration (`/api/render-workflow/*`), not Render’s Workflow API. `RENDER_API_KEY` (`rnd_…`) is **not** used in code yet. |
+| **Workflow task bodies** | Stubs | `workflow/investigation.py` tasks return placeholder JSON; full You.com/Parasail/bridge logic still lives in the main SSE pipeline. |
+| **Local Ollama from Render** | Expected unavailable | Local Analyst skipped or unavailable from cloud; not a deployment bug. |
+| **Opsera** | Dev-only artifact | Build review JSON for how the app was built in Cursor — **not** a runtime agent. |
+
+### Environment variables (web service `ralphiia-liveops-intelligence`)
+
+Required for the live demo acts: `YDC_API_KEY` or `YOUCOM_API_KEY`, `PARASAIL_API_KEY`, `RALFIA_STATUS_URL`, `RALFIA_STATUS_TOKEN` (or bridge token).
+
+For Act 3 (issue create): `ONE_SECRET`, `ONE_GITHUB_CONNECTION_KEY`, `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`.
+
+For workflow button: `LIVEOPS_RENDER_WORKFLOW=true`, `LIVEOPS_RENDER_WORKFLOW_SERVICE=ralphiia-liveops-investigation`.
+
+`RENDER_API_KEY` is for future Render API integration — **does not** replace `ONE_SECRET`.
+
+---
 | | |
 |---|---|
 | **Hackathon** | You.com Agentic Hackathon · San Francisco · July 2026 |
